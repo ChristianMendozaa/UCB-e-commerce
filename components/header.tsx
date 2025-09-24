@@ -1,0 +1,189 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import Link from "next/link"
+import Image from "next/image"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { ShoppingCart, Menu, X, LogOut } from "lucide-react"
+import { authService, type AuthUser } from "@/lib/auth"
+import { db } from "@/lib/database"
+import { ThemeToggle } from "./theme-toggle"
+
+export function Header() {
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [cartCount, setCartCount] = useState(0)
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+
+  useEffect(() => {
+    const currentUser = authService.getCurrentUser()
+    setUser(currentUser)
+
+    if (currentUser) {
+      loadCartCount(currentUser.id)
+    }
+  }, [])
+
+  const loadCartCount = async (userId: string) => {
+    const cartItems = await db.getCartItems(userId)
+    const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0)
+    setCartCount(totalItems)
+  }
+
+  const handleLogout = () => {
+    authService.logout()
+    setUser(null)
+    setCartCount(0)
+    window.location.href = "/"
+  }
+
+  return (
+    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="container mx-auto px-4">
+        <div className="flex h-16 items-center justify-between">
+          <Link href="/" className="flex items-center space-x-3">
+            <div className="relative h-10 w-10 flex-shrink-0">
+              <Image
+                src="/ucb-logo.png"
+                alt="Universidad Católica Boliviana"
+                fill
+                className="object-contain"
+                priority
+              />
+            </div>
+            <div className="hidden sm:block">
+              <h1 className="text-lg font-bold text-foreground leading-tight">UCB Store</h1>
+              <p className="text-xs text-muted-foreground leading-tight">Universidad Católica Boliviana</p>
+            </div>
+          </Link>
+
+          {/* Desktop Navigation */}
+          <nav className="hidden md:flex items-center space-x-6">
+            <Link href="/catalog" className="text-sm font-medium hover:text-primary transition-colors">
+              Catálogo
+            </Link>
+            <Link href="/careers" className="text-sm font-medium hover:text-primary transition-colors">
+              Por Carrera
+            </Link>
+            {user?.role === "admin" && (
+              <Link href="/admin" className="text-sm font-medium hover:text-primary transition-colors">
+                Administración
+              </Link>
+            )}
+          </nav>
+
+          {/* User Actions */}
+          <div className="flex items-center space-x-2">
+            <ThemeToggle />
+
+            {user ? (
+              <>
+                {/* Cart */}
+                <Link href="/cart">
+                  <Button variant="ghost" size="sm" className="relative">
+                    <ShoppingCart className="h-5 w-5" />
+                    {cartCount > 0 && (
+                      <Badge
+                        variant="destructive"
+                        className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
+                      >
+                        {cartCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </Link>
+
+                {/* User Menu */}
+                <div className="hidden md:flex items-center space-x-2">
+                  <div className="text-right">
+                    <p className="text-sm font-medium">{user.name}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={handleLogout}>
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="hidden md:flex items-center space-x-2">
+                <Link href="/login">
+                  <Button variant="ghost" size="sm">
+                    Iniciar Sesión
+                  </Button>
+                </Link>
+                <Link href="/register">
+                  <Button size="sm">Registrarse</Button>
+                </Link>
+              </div>
+            )}
+
+            {/* Mobile Menu Button */}
+            <Button variant="ghost" size="sm" className="md:hidden" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+              {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </Button>
+          </div>
+        </div>
+
+        {/* Mobile Menu */}
+        {isMenuOpen && (
+          <div className="md:hidden border-t bg-background">
+            <div className="py-4 space-y-2">
+              <Link
+                href="/catalog"
+                className="block px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Catálogo
+              </Link>
+              <Link
+                href="/careers"
+                className="block px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Por Carrera
+              </Link>
+
+              {user ? (
+                <>
+                  {user.role === "admin" && (
+                    <Link
+                      href="/admin"
+                      className="block px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
+                      onClick={() => setIsMenuOpen(false)}
+                    >
+                      Administración
+                    </Link>
+                  )}
+                  <div className="px-4 py-2 border-t">
+                    <p className="text-sm font-medium">{user.name}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
+                    {user.career && <p className="text-xs text-muted-foreground">{user.career}</p>}
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="block w-full text-left px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
+                  >
+                    Cerrar Sesión
+                  </button>
+                </>
+              ) : (
+                <div className="px-4 py-2 space-y-2 border-t">
+                  <Link href="/login" onClick={() => setIsMenuOpen(false)}>
+                    <Button variant="ghost" size="sm" className="w-full justify-start">
+                      Iniciar Sesión
+                    </Button>
+                  </Link>
+                  <Link href="/register" onClick={() => setIsMenuOpen(false)}>
+                    <Button size="sm" className="w-full">
+                      Registrarse
+                    </Button>
+                  </Link>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </header>
+  )
+}
