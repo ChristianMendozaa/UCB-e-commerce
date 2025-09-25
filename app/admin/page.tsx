@@ -7,10 +7,31 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Package,
   ShoppingCart,
@@ -29,11 +50,11 @@ import {
   UserX,
   Shield,
   ShieldCheck,
+  Upload,
 } from "lucide-react"
 import type { Product, Order, User } from "@/lib/database"
 import { db } from "@/lib/database"
 import { useToast } from "@/hooks/use-toast"
-import Link from "next/link"
 
 interface DashboardStats {
   totalProducts: number
@@ -76,6 +97,28 @@ export default function AdminDashboard() {
   const [userSearchTerm, setUserSearchTerm] = useState("")
   const [selectedUserRole, setSelectedUserRole] = useState<string>("all")
 
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null)
+
+  const [productForm, setProductForm] = useState({
+    name: "",
+    description: "",
+    price: "",
+    category: "",
+    career: "",
+    stock: "",
+    image: "",
+  })
+
+  const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false)
+
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
+
   const { toast } = useToast()
 
   const careers = db.getCareers()
@@ -100,6 +143,8 @@ export default function AdminDashboard() {
   const loadDashboardData = async () => {
     setIsLoading(true)
     try {
+      await addSampleOrders()
+
       // Load all data
       const [productsData, ordersData, usersData] = await Promise.all([
         db.getProducts(),
@@ -140,6 +185,43 @@ export default function AdminDashboard() {
       })
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const addSampleOrders = async () => {
+    const existingOrders = await db.getOrders()
+    if (existingOrders.length === 0) {
+      // Create sample orders
+      const sampleOrders = [
+        {
+          userId: "2",
+          items: [
+            { productId: "1", quantity: 1, price: 4500 },
+            { productId: "2", quantity: 2, price: 280 },
+          ],
+          total: 5060,
+          status: "pending" as const,
+        },
+        {
+          userId: "2",
+          items: [{ productId: "3", quantity: 1, price: 350 }],
+          total: 350,
+          status: "confirmed" as const,
+        },
+        {
+          userId: "1",
+          items: [
+            { productId: "4", quantity: 1, price: 320 },
+            { productId: "5", quantity: 1, price: 850 },
+          ],
+          total: 1170,
+          status: "shipped" as const,
+        },
+      ]
+
+      for (const order of sampleOrders) {
+        await db.createOrder(order)
+      }
     }
   }
 
@@ -202,15 +284,30 @@ export default function AdminDashboard() {
     setFilteredUsers(filtered)
   }
 
-  // Action functions
-  const deleteProduct = async (productId: string) => {
-    if (!confirm("¿Estás seguro de que quieres eliminar este producto?")) {
-      return
-    }
+  const handleViewProduct = (product: Product) => {
+    setSelectedProduct(product)
+    setIsProductModalOpen(true)
+  }
 
+  const handleEditProduct = (product: Product) => {
+    setSelectedProduct(product)
+    setProductForm({
+      name: product.name,
+      description: product.description,
+      price: product.price.toString(),
+      category: product.category,
+      career: product.career,
+      stock: product.stock.toString(),
+      image: product.image,
+    })
+    setIsEditModalOpen(true)
+  }
+
+  const handleDeleteProduct = async (product: Product) => {
     try {
-      await db.deleteProduct(productId)
-      setProducts(products.filter((p) => p.id !== productId))
+      await db.deleteProduct(product.id)
+      setProducts(products.filter((p) => p.id !== product.id))
+      setProductToDelete(null)
       toast({
         title: "Producto eliminado",
         description: "El producto ha sido eliminado exitosamente",
@@ -222,6 +319,107 @@ export default function AdminDashboard() {
         variant: "destructive",
       })
     }
+  }
+
+  const handleAddProduct = async () => {
+    try {
+      const newProduct = await db.createProduct({
+        name: productForm.name,
+        description: productForm.description,
+        price: Number.parseFloat(productForm.price),
+        category: productForm.category,
+        career: productForm.career,
+        stock: Number.parseInt(productForm.stock),
+        image: productForm.image || "/placeholder.svg",
+      })
+      setProducts([...products, newProduct])
+      setIsAddModalOpen(false)
+      setProductForm({
+        name: "",
+        description: "",
+        price: "",
+        category: "",
+        career: "",
+        stock: "",
+        image: "",
+      })
+      toast({
+        title: "Producto creado",
+        description: "El producto ha sido creado exitosamente",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo crear el producto",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleUpdateProduct = async () => {
+    if (!selectedProduct) return
+
+    try {
+      const updatedProduct = await db.updateProduct(selectedProduct.id, {
+        name: productForm.name,
+        description: productForm.description,
+        price: Number.parseFloat(productForm.price),
+        category: productForm.category,
+        career: productForm.career,
+        stock: Number.parseInt(productForm.stock),
+        image: productForm.image,
+      })
+
+      if (updatedProduct) {
+        setProducts(products.map((p) => (p.id === selectedProduct.id ? updatedProduct : p)))
+        setIsEditModalOpen(false)
+        toast({
+          title: "Producto actualizado",
+          description: "El producto ha sido actualizado exitosamente",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar el producto",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleViewUser = (user: User) => {
+    setSelectedUser(user)
+    setIsUserModalOpen(true)
+  }
+
+  const toggleUserRole = async (userId: string, currentRole: string) => {
+    const newRole = currentRole === "admin" ? "student" : "admin"
+
+    try {
+      // Update in database (simulated)
+      const userIndex = users.findIndex((u) => u.id === userId)
+      if (userIndex !== -1) {
+        const updatedUsers = [...users]
+        updatedUsers[userIndex] = { ...updatedUsers[userIndex], role: newRole as any }
+        setUsers(updatedUsers)
+
+        toast({
+          title: "Rol actualizado",
+          description: `El usuario ahora es ${newRole === "admin" ? "administrador" : "estudiante"}`,
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar el rol del usuario",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleViewOrder = (order: Order) => {
+    setSelectedOrder(order)
+    setIsOrderModalOpen(true)
   }
 
   const updateOrderStatus = async (orderId: string, newStatus: Order["status"]) => {
@@ -236,25 +434,6 @@ export default function AdminDashboard() {
       toast({
         title: "Error",
         description: "No se pudo actualizar el estado del pedido",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const toggleUserRole = async (userId: string, currentRole: string) => {
-    const newRole = currentRole === "admin" ? "user" : "admin"
-
-    try {
-      await db.updateUserRole(userId, newRole)
-      setUsers(users.map((user) => (user.id === userId ? { ...user, role: newRole } : user)))
-      toast({
-        title: "Rol actualizado",
-        description: `El usuario ahora es ${newRole === "admin" ? "administrador" : "usuario"}`,
-      })
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "No se pudo actualizar el rol del usuario",
         variant: "destructive",
       })
     }
@@ -322,6 +501,10 @@ export default function AdminDashboard() {
         </Badge>
       )
     }
+  }
+
+  const getProductDetails = (productId: string) => {
+    return products.find((p) => p.id === productId)
   }
 
   if (isLoading) {
@@ -525,12 +708,129 @@ export default function AdminDashboard() {
                     <CardTitle>Gestión de Productos ({filteredProducts.length})</CardTitle>
                     <CardDescription>Administra el catálogo de productos</CardDescription>
                   </div>
-                  <Link href="/admin/products/new">
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Nuevo Producto
-                    </Button>
-                  </Link>
+                  <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Nuevo Producto
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>Agregar Nuevo Producto</DialogTitle>
+                        <DialogDescription>Completa la información del nuevo producto</DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="name">Nombre del producto</Label>
+                            <Input
+                              id="name"
+                              value={productForm.name}
+                              onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                              placeholder="Ej: Laptop Dell Inspiron"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="price">Precio (Bs.)</Label>
+                            <Input
+                              id="price"
+                              type="number"
+                              value={productForm.price}
+                              onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
+                              placeholder="0.00"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="description">Descripción</Label>
+                          <Textarea
+                            id="description"
+                            value={productForm.description}
+                            onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                            placeholder="Descripción detallada del producto"
+                            rows={3}
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="career">Carrera</Label>
+                            <Select
+                              value={productForm.career}
+                              onValueChange={(value) => setProductForm({ ...productForm, career: value })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Seleccionar carrera" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {careers.map((career) => (
+                                  <SelectItem key={career} value={career}>
+                                    {career}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="category">Categoría</Label>
+                            <Select
+                              value={productForm.category}
+                              onValueChange={(value) => setProductForm({ ...productForm, category: value })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Seleccionar categoría" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {categories.map((category) => (
+                                  <SelectItem key={category} value={category}>
+                                    {category}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="stock">Stock</Label>
+                            <Input
+                              id="stock"
+                              type="number"
+                              value={productForm.stock}
+                              onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
+                              placeholder="0"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="image">URL de la imagen</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              id="image"
+                              value={productForm.image}
+                              onChange={(e) => setProductForm({ ...productForm, image: e.target.value })}
+                              placeholder="https://ejemplo.com/imagen.jpg o /ruta/imagen.jpg"
+                            />
+                            <Button variant="outline" size="icon">
+                              <Upload className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Puedes usar una URL externa o subir una imagen
+                          </p>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button
+                          onClick={handleAddProduct}
+                          disabled={!productForm.name || !productForm.price || !productForm.career}
+                        >
+                          Crear Producto
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </CardHeader>
                 <CardContent>
                   {/* Filters */}
@@ -595,12 +895,10 @@ export default function AdminDashboard() {
                           ? "Aún no tienes productos. Crea tu primer producto."
                           : "Intenta ajustar tus filtros de búsqueda."}
                       </p>
-                      <Link href="/admin/products/new">
-                        <Button>
-                          <Plus className="mr-2 h-4 w-4" />
-                          Crear Producto
-                        </Button>
-                      </Link>
+                      <Button onClick={() => setIsAddModalOpen(true)}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Crear Producto
+                      </Button>
                     </div>
                   ) : (
                     <div className="rounded-md border overflow-x-auto">
@@ -651,17 +949,17 @@ export default function AdminDashboard() {
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
-                                    <DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleViewProduct(product)}>
                                       <Eye className="mr-2 h-4 w-4" />
                                       Ver detalles
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleEditProduct(product)}>
                                       <Edit className="mr-2 h-4 w-4" />
                                       Editar
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       className="text-destructive"
-                                      onClick={() => deleteProduct(product.id)}
+                                      onClick={() => setProductToDelete(product)}
                                     >
                                       <Trash2 className="mr-2 h-4 w-4" />
                                       Eliminar
@@ -758,7 +1056,9 @@ export default function AdminDashboard() {
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <p className="font-medium">{order.userId}</p>
+                                <p className="font-medium">
+                                  {users.find((u) => u.id === order.userId)?.name || "Usuario desconocido"}
+                                </p>
                               </TableCell>
                               <TableCell>{new Date(order.createdAt).toLocaleDateString()}</TableCell>
                               <TableCell className="font-medium">Bs. {order.total.toFixed(2)}</TableCell>
@@ -778,7 +1078,7 @@ export default function AdminDashboard() {
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
-                                    <DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleViewOrder(order)}>
                                       <Eye className="mr-2 h-4 w-4" />
                                       Ver detalles
                                     </DropdownMenuItem>
@@ -832,7 +1132,8 @@ export default function AdminDashboard() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos los roles</SelectItem>
-                        <SelectItem value="user">Usuario</SelectItem>
+                        <SelectItem value="student">Estudiante</SelectItem>
+                        <SelectItem value="teacher">Profesor</SelectItem>
                         <SelectItem value="admin">Administrador</SelectItem>
                       </SelectContent>
                     </Select>
@@ -867,6 +1168,7 @@ export default function AdminDashboard() {
                             <TableHead>Usuario</TableHead>
                             <TableHead>Email</TableHead>
                             <TableHead>Rol</TableHead>
+                            <TableHead>Carrera</TableHead>
                             <TableHead>Fecha de registro</TableHead>
                             <TableHead className="w-[70px]">Acciones</TableHead>
                           </TableRow>
@@ -886,16 +1188,35 @@ export default function AdminDashboard() {
                               </TableCell>
                               <TableCell>{user.email}</TableCell>
                               <TableCell>
-                                <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+                                <Badge
+                                  variant={
+                                    user.role === "admin"
+                                      ? "default"
+                                      : user.role === "teacher"
+                                        ? "secondary"
+                                        : "outline"
+                                  }
+                                >
                                   <div className="flex items-center space-x-1">
                                     {user.role === "admin" ? (
                                       <ShieldCheck className="h-3 w-3" />
                                     ) : (
                                       <Shield className="h-3 w-3" />
                                     )}
-                                    <span>{user.role === "admin" ? "Administrador" : "Usuario"}</span>
+                                    <span>
+                                      {user.role === "admin"
+                                        ? "Administrador"
+                                        : user.role === "teacher"
+                                          ? "Profesor"
+                                          : "Estudiante"}
+                                    </span>
                                   </div>
                                 </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-sm text-muted-foreground">
+                                  {user.career || "No especificada"}
+                                </span>
                               </TableCell>
                               <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
                               <TableCell>
@@ -906,7 +1227,7 @@ export default function AdminDashboard() {
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
-                                    <DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleViewUser(user)}>
                                       <Eye className="mr-2 h-4 w-4" />
                                       Ver perfil
                                     </DropdownMenuItem>
@@ -937,6 +1258,298 @@ export default function AdminDashboard() {
             </TabsContent>
           </Tabs>
         </div>
+
+        <Dialog open={isProductModalOpen} onOpenChange={setIsProductModalOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Detalles del Producto</DialogTitle>
+            </DialogHeader>
+            {selectedProduct && (
+              <div className="space-y-4">
+                <div className="flex items-start space-x-4">
+                  <img
+                    src={selectedProduct.image || "/placeholder.svg"}
+                    alt={selectedProduct.name}
+                    className="w-24 h-24 object-cover rounded-lg"
+                  />
+                  <div className="flex-1">
+                    <h3 className="text-xl font-semibold">{selectedProduct.name}</h3>
+                    <p className="text-muted-foreground">{selectedProduct.description}</p>
+                    <div className="flex items-center space-x-2 mt-2">
+                      <Badge variant="outline">{selectedProduct.career}</Badge>
+                      <Badge variant="secondary">{selectedProduct.category}</Badge>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium">Precio</Label>
+                    <p className="text-lg font-bold">Bs. {selectedProduct.price}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Stock</Label>
+                    <p className="text-lg">{selectedProduct.stock} unidades</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Estado</Label>
+                    <div className="mt-1">{getStockBadge(selectedProduct.stock)}</div>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Fecha de creación</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {new Date(selectedProduct.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Editar Producto</DialogTitle>
+              <DialogDescription>Modifica la información del producto</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-name">Nombre del producto</Label>
+                  <Input
+                    id="edit-name"
+                    value={productForm.name}
+                    onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-price">Precio (Bs.)</Label>
+                  <Input
+                    id="edit-price"
+                    type="number"
+                    value={productForm.price}
+                    onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-description">Descripción</Label>
+                <Textarea
+                  id="edit-description"
+                  value={productForm.description}
+                  onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-career">Carrera</Label>
+                  <Select
+                    value={productForm.career}
+                    onValueChange={(value) => setProductForm({ ...productForm, career: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {careers.map((career) => (
+                        <SelectItem key={career} value={career}>
+                          {career}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-category">Categoría</Label>
+                  <Select
+                    value={productForm.category}
+                    onValueChange={(value) => setProductForm({ ...productForm, category: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((category) => (
+                        <SelectItem key={category} value={category}>
+                          {category}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-stock">Stock</Label>
+                  <Input
+                    id="edit-stock"
+                    type="number"
+                    value={productForm.stock}
+                    onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-image">URL de la imagen</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="edit-image"
+                    value={productForm.image}
+                    onChange={(e) => setProductForm({ ...productForm, image: e.target.value })}
+                  />
+                  <Button variant="outline" size="icon">
+                    <Upload className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleUpdateProduct}>Guardar Cambios</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog open={!!productToDelete} onOpenChange={() => setProductToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta acción no se puede deshacer. El producto "{productToDelete?.name}" será eliminado permanentemente
+                del catálogo.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => productToDelete && handleDeleteProduct(productToDelete)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Eliminar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <Dialog open={isUserModalOpen} onOpenChange={setIsUserModalOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Perfil de Usuario</DialogTitle>
+            </DialogHeader>
+            {selectedUser && (
+              <div className="space-y-4">
+                <div className="flex items-center space-x-4">
+                  <div className="w-16 h-16 bg-primary rounded-full flex items-center justify-center text-primary-foreground text-xl font-medium">
+                    {selectedUser.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-semibold">{selectedUser.name}</h3>
+                    <p className="text-muted-foreground">{selectedUser.email}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium">Rol</Label>
+                    <div className="mt-1">
+                      <Badge
+                        variant={
+                          selectedUser.role === "admin"
+                            ? "default"
+                            : selectedUser.role === "teacher"
+                              ? "secondary"
+                              : "outline"
+                        }
+                      >
+                        {selectedUser.role === "admin"
+                          ? "Administrador"
+                          : selectedUser.role === "teacher"
+                            ? "Profesor"
+                            : "Estudiante"}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Carrera</Label>
+                    <p className="text-sm">{selectedUser.career || "No especificada"}</p>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Fecha de registro</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {new Date(selectedUser.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isOrderModalOpen} onOpenChange={setIsOrderModalOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Detalles del Pedido</DialogTitle>
+            </DialogHeader>
+            {selectedOrder && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-semibold">Pedido #{selectedOrder.id}</h3>
+                    <p className="text-muted-foreground">{new Date(selectedOrder.createdAt).toLocaleDateString()}</p>
+                  </div>
+                  <Badge className={`${getOrderStatusColor(selectedOrder.status)} text-white`}>
+                    <div className="flex items-center space-x-1">
+                      {getOrderStatusIcon(selectedOrder.status)}
+                      <span>{getOrderStatusText(selectedOrder.status)}</span>
+                    </div>
+                  </Badge>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium">Cliente</Label>
+                  <p className="text-sm">
+                    {users.find((u) => u.id === selectedOrder.userId)?.name || "Usuario desconocido"}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {users.find((u) => u.id === selectedOrder.userId)?.email}
+                  </p>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium">Productos</Label>
+                  <div className="space-y-2 mt-2">
+                    {selectedOrder.items.map((item, index) => {
+                      const product = getProductDetails(item.productId)
+                      return (
+                        <div key={index} className="flex items-center justify-between p-2 border rounded">
+                          <div className="flex items-center space-x-3">
+                            <img
+                              src={product?.image || "/placeholder.svg"}
+                              alt={product?.name || "Producto"}
+                              className="w-10 h-10 object-cover rounded"
+                            />
+                            <div>
+                              <p className="font-medium">{product?.name || "Producto desconocido"}</p>
+                              <p className="text-sm text-muted-foreground">Cantidad: {item.quantity}</p>
+                            </div>
+                          </div>
+                          <p className="font-medium">Bs. {(item.price * item.quantity).toFixed(2)}</p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-semibold">Total:</span>
+                    <span className="text-xl font-bold">Bs. {selectedOrder.total.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </AdminGuard>
   )
