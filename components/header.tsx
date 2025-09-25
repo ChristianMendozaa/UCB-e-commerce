@@ -5,35 +5,24 @@ import Link from "next/link"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ShoppingCart, Menu, X, LogOut } from "lucide-react"
+import { ShoppingCart, Menu, X, LogOut, Package } from "lucide-react"
 import { authService, type AuthUser } from "@/lib/auth"
-import { db } from "@/lib/database"
 import { ThemeToggle } from "./theme-toggle"
+import { useCart } from "@/contexts/cart-context"
 
 export function Header() {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [cartCount, setCartCount] = useState(0)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const { cartCount } = useCart()
 
   useEffect(() => {
     const currentUser = authService.getCurrentUser()
     setUser(currentUser)
-
-    if (currentUser) {
-      loadCartCount(currentUser.id)
-    }
   }, [])
-
-  const loadCartCount = async (userId: string) => {
-    const cartItems = await db.getCartItems(userId)
-    const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0)
-    setCartCount(totalItems)
-  }
 
   const handleLogout = () => {
     authService.logout()
     setUser(null)
-    setCartCount(0)
     window.location.href = "/"
   }
 
@@ -78,6 +67,13 @@ export function Header() {
 
             {user ? (
               <>
+                <Link href="/orders">
+                  <Button variant="ghost" size="sm">
+                    <Package className="h-5 w-5" />
+                    <span className="hidden sm:inline ml-2">Mis Pedidos</span>
+                  </Button>
+                </Link>
+
                 {/* Cart */}
                 <Link href="/cart">
                   <Button variant="ghost" size="sm" className="relative">
@@ -145,6 +141,14 @@ export function Header() {
 
               {user ? (
                 <>
+                  <Link
+                    href="/orders"
+                    className="block px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Mis Pedidos
+                  </Link>
+
                   {user.role === "admin" && (
                     <Link
                       href="/admin"

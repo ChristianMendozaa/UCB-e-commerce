@@ -10,6 +10,7 @@ import type { Product } from "@/lib/database"
 import { db } from "@/lib/database"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
+import { useCart } from "@/contexts/cart-context"
 import Link from "next/link"
 
 interface ProductCardProps {
@@ -21,6 +22,7 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
   const [quantity, setQuantity] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
+  const { updateCartCount } = useCart()
 
   const handleAddToCart = async () => {
     const user = authService.getCurrentUser()
@@ -36,6 +38,7 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
     setIsLoading(true)
     try {
       await db.addToCart(user.id, product.id, quantity)
+      await updateCartCount()
       toast({
         title: "Producto agregado",
         description: `${product.name} agregado al carrito`,

@@ -15,6 +15,7 @@ import type { CartItem, Product } from "@/lib/database"
 import { db } from "@/lib/database"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
+import { useCart } from "@/contexts/cart-context"
 
 interface CartItemWithProduct extends CartItem {
   product: Product
@@ -26,6 +27,7 @@ export default function CartPage() {
   const [isUpdating, setIsUpdating] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
+  const { updateCartCount } = useCart()
 
   useEffect(() => {
     const user = authService.getCurrentUser()
@@ -69,6 +71,7 @@ export default function CartPage() {
     try {
       await db.updateCartItem(itemId, newQuantity)
       setCartItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, quantity: newQuantity } : item)))
+      await updateCartCount()
       toast({
         title: "Cantidad actualizada",
         description: "La cantidad del producto ha sido actualizada",
@@ -89,6 +92,7 @@ export default function CartPage() {
     try {
       await db.removeFromCart(itemId)
       setCartItems((prev) => prev.filter((item) => item.id !== itemId))
+      await updateCartCount()
       toast({
         title: "Producto eliminado",
         description: "El producto ha sido eliminado del carrito",
@@ -109,7 +113,6 @@ export default function CartPage() {
     if (!user) return
 
     try {
-      // Crear orden
       const orderItems = cartItems.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -125,10 +128,11 @@ export default function CartPage() {
         status: "pending",
       })
 
-      // Limpiar carrito
       for (const item of cartItems) {
         await db.removeFromCart(item.id)
       }
+
+      await updateCartCount()
 
       toast({
         title: "¡Pedido realizado!",
@@ -182,7 +186,6 @@ export default function CartPage() {
 
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
-          {/* Header */}
           <div className="mb-8">
             <Link
               href="/catalog"
@@ -212,13 +215,11 @@ export default function CartPage() {
             </Card>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Cart Items */}
               <div className="lg:col-span-2 space-y-4">
                 {cartItems.map((item) => (
                   <Card key={item.id}>
                     <CardContent className="p-6">
                       <div className="flex space-x-4">
-                        {/* Product Image */}
                         <div className="relative w-20 h-20 rounded-lg overflow-hidden bg-muted">
                           <Image
                             src={item.product.image || "/placeholder.svg"}
@@ -228,7 +229,6 @@ export default function CartPage() {
                           />
                         </div>
 
-                        {/* Product Info */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between">
                             <div className="flex-1 min-w-0">
@@ -254,7 +254,6 @@ export default function CartPage() {
                             </Button>
                           </div>
 
-                          {/* Quantity and Price */}
                           <div className="flex items-center justify-between mt-4">
                             <div className="flex items-center space-x-2">
                               <Button
@@ -283,7 +282,6 @@ export default function CartPage() {
                             </div>
                           </div>
 
-                          {/* Stock Warning */}
                           {item.quantity >= item.product.stock && (
                             <Alert className="mt-3">
                               <AlertDescription className="text-sm">
@@ -298,7 +296,6 @@ export default function CartPage() {
                 ))}
               </div>
 
-              {/* Order Summary */}
               <div className="lg:col-span-1">
                 <Card className="sticky top-8">
                   <CardHeader>

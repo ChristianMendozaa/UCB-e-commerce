@@ -11,12 +11,15 @@ import { Separator } from "@/components/ui/separator"
 import { Header } from "@/components/header"
 import { ArrowLeft, ShoppingCart, Package, Star, Truck, Shield, RefreshCw } from "lucide-react"
 import { db, type Product } from "@/lib/database"
-import { useAuth } from "@/lib/auth"
+import { authService } from "@/lib/auth"
+import { useToast } from "@/hooks/use-toast"
+import { useCart } from "@/contexts/cart-context"
 
 export default function ProductDetailPage() {
   const params = useParams()
   const router = useRouter()
-  const { user } = useAuth()
+  const { toast } = useToast()
+  const { updateCartCount } = useCart()
   const [product, setProduct] = useState<Product | null>(null)
   const [quantity, setQuantity] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
@@ -39,7 +42,13 @@ export default function ProductDetailPage() {
   }
 
   const handleAddToCart = async () => {
+    const user = authService.getCurrentUser()
     if (!user) {
+      toast({
+        title: "Inicia sesión",
+        description: "Debes iniciar sesión para agregar productos al carrito",
+        variant: "destructive",
+      })
       router.push("/login")
       return
     }
@@ -49,10 +58,20 @@ export default function ProductDetailPage() {
     setIsAddingToCart(true)
     try {
       await db.addToCart(user.id, product.id, quantity)
-      // Show success message or redirect to cart
-      router.push("/cart")
+      await updateCartCount()
+      toast({
+        title: "Producto agregado",
+        description: `${product.name} agregado al carrito`,
+      })
+      // Optionally redirect to cart or stay on page
+      // router.push("/cart")
     } catch (error) {
       console.error("Error adding to cart:", error)
+      toast({
+        title: "Error",
+        description: "No se pudo agregar el producto al carrito",
+        variant: "destructive",
+      })
     } finally {
       setIsAddingToCart(false)
     }
@@ -222,15 +241,6 @@ export default function ProductDetailPage() {
                   </>
                 )}
               </Button>
-
-              {!user && (
-                <p className="text-sm text-muted-foreground text-center">
-                  <Link href="/login" className="text-primary hover:underline">
-                    Inicia sesión
-                  </Link>{" "}
-                  para agregar productos al carrito
-                </p>
-              )}
             </div>
 
             {/* Features */}

@@ -3,6 +3,9 @@ import type { Metadata } from "next"
 import { Inter, JetBrains_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { Suspense } from "react"
+import { CartProvider } from "@/contexts/cart-context"
+import { Toaster } from "@/components/ui/toaster"
+import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
 
 const inter = Inter({
@@ -56,7 +59,12 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body className={`font-sans ${inter.variable} ${jetbrainsMono.variable} antialiased`}>
-        <Suspense fallback={null}>{children}</Suspense>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <CartProvider>
+            <Suspense fallback={null}>{children}</Suspense>
+            <Toaster />
+          </CartProvider>
+        </ThemeProvider>
         <Analytics />
       </body>
     </html>
