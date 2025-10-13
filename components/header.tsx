@@ -6,7 +6,7 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ShoppingCart, Menu, X, LogOut, Package } from "lucide-react"
-import { authService, type AuthUser } from "@/lib/auth"
+import { authService, type AuthUser } from "@/lib/auth" // asegúrate que exporte is_admin opcional
 import { ThemeToggle } from "./theme-toggle"
 import { useCart } from "@/contexts/cart-context"
 
@@ -16,12 +16,41 @@ export function Header() {
   const { cartCount } = useCart()
 
   useEffect(() => {
-    const currentUser = authService.getCurrentUser()
-    setUser(currentUser)
+    let mounted = true
+
+    // Cargar usuario (respeta cookie HttpOnly; usa cache/localStorage si existe)
+    ;(async () => {
+      try {
+        const u = await authService.getCurrentUser()
+        if (mounted) setUser(u)
+      } catch {
+        if (mounted) setUser(null)
+      }
+    })()
+
+    // Sincroniza cambios de sesión entre pestañas
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "authUser") {
+        try {
+          const parsed = e.newValue ? (JSON.parse(e.newValue) as AuthUser) : null
+          setUser(parsed)
+        } catch {
+          setUser(null)
+        }
+      }
+    }
+    window.addEventListener("storage", onStorage)
+
+    return () => {
+      mounted = false
+      window.removeEventListener("storage", onStorage)
+    }
   }, [])
 
-  const handleLogout = () => {
-    authService.logout()
+  const isAdmin = !!(user?.is_admin || user?.role === "admin")
+
+  const handleLogout = async () => {
+    await authService.logout()
     setUser(null)
     window.location.href = "/"
   }
@@ -54,7 +83,7 @@ export function Header() {
             <Link href="/careers" className="text-sm font-medium hover:text-primary transition-colors">
               Por Carrera
             </Link>
-            {user?.role === "admin" && (
+            {isAdmin && (
               <Link href="/admin" className="text-sm font-medium hover:text-primary transition-colors">
                 Administración
               </Link>
@@ -93,7 +122,7 @@ export function Header() {
                 <div className="hidden md:flex items-center space-x-2">
                   <div className="text-right">
                     <p className="text-sm font-medium">{user.name}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{isAdmin ? "admin" : user.role}</p>
                   </div>
                   <Button variant="ghost" size="sm" onClick={handleLogout}>
                     <LogOut className="h-4 w-4" />
@@ -106,9 +135,6 @@ export function Header() {
                   <Button variant="ghost" size="sm">
                     Iniciar Sesión
                   </Button>
-                </Link>
-                <Link href="/register">
-                  <Button size="sm">Registrarse</Button>
                 </Link>
               </div>
             )}
@@ -149,7 +175,7 @@ export function Header() {
                     Mis Pedidos
                   </Link>
 
-                  {user.role === "admin" && (
+                  {isAdmin && (
                     <Link
                       href="/admin"
                       className="block px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
@@ -160,7 +186,7 @@ export function Header() {
                   )}
                   <div className="px-4 py-2 border-t">
                     <p className="text-sm font-medium">{user.name}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{isAdmin ? "admin" : user.role}</p>
                     {user.career && <p className="text-xs text-muted-foreground">{user.career}</p>}
                   </div>
                   <button
@@ -175,11 +201,6 @@ export function Header() {
                   <Link href="/login" onClick={() => setIsMenuOpen(false)}>
                     <Button variant="ghost" size="sm" className="w-full justify-start">
                       Iniciar Sesión
-                    </Button>
-                  </Link>
-                  <Link href="/register" onClick={() => setIsMenuOpen(false)}>
-                    <Button size="sm" className="w-full">
-                      Registrarse
                     </Button>
                   </Link>
                 </div>

@@ -164,11 +164,6 @@ export default function HomePage() {
             Únete a la comunidad UCB y accede a productos especializados para tu carrera
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/register">
-              <Button size="lg" className="w-full sm:w-auto">
-                Crear Cuenta
-              </Button>
-            </Link>
             <Link href="/login">
               <Button variant="outline" size="lg" className="w-full sm:w-auto bg-transparent">
                 Iniciar Sesión
