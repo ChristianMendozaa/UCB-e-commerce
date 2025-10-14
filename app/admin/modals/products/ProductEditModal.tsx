@@ -1,42 +1,37 @@
 "use client"
-
-import { FC } from "react"
+import { FC, ChangeEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Upload } from "lucide-react"
-
-type ProductForm = {
-  name: string
-  description: string
-  price: string
-  category: string
-  career: string
-  stock: string
-  image: string
-}
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import type { ProductFormState } from "@/lib/products"
 
 type Props = {
   open: boolean
   onOpenChange: (v: boolean) => void
-  form: ProductForm
-  setForm: (f: ProductForm) => void
+  form: ProductFormState
+  // 👇 igual que useState
+  setForm: React.Dispatch<React.SetStateAction<ProductFormState>>
   careers: string[]
   categories: string[]
   onSubmit: () => void
+  /** si existe, la carrera queda fija */
+  lockCareer?: string | null
 }
 
-const ProductEditModal: FC<Props> = ({ open, onOpenChange, form, setForm, careers, categories, onSubmit }) => {
+const ProductEditModal: FC<Props> = ({
+  open, onOpenChange, form, setForm, careers, categories, onSubmit, lockCareer
+}) => {
+  const onFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null
+    setForm(p => ({ ...p, imageFile: file, image: file ? URL.createObjectURL(file) : p.image }))
+  }
+
+  const careerValue = lockCareer ?? form.career
+  const careerOptions = lockCareer ? [lockCareer] : careers
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -49,96 +44,57 @@ const ProductEditModal: FC<Props> = ({ open, onOpenChange, form, setForm, career
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="edit-name">Nombre del producto</Label>
-              <Input
-                id="edit-name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
+              <Input id="edit-name" value={form.name} onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-price">Precio (Bs.)</Label>
-              <Input
-                id="edit-price"
-                type="number"
-                value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
-              />
+              <Input id="edit-price" type="number" value={form.price} onChange={(e) => setForm(p => ({ ...p, price: e.target.value }))} />
             </div>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="edit-description">Descripción</Label>
-            <Textarea
-              id="edit-description"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              rows={3}
-            />
+            <Textarea id="edit-description" rows={3} value={form.description} onChange={(e) => setForm(p => ({ ...p, description: e.target.value }))} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="edit-career">Carrera</Label>
-              <Select value={form.career} onValueChange={(v) => setForm({ ...form, career: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
+              <Select
+                value={careerValue}
+                onValueChange={(v) => setForm(p => ({ ...p, career: v }))}
+                disabled={!!lockCareer}
+              >
+                <SelectTrigger><SelectValue placeholder="Seleccionar carrera" /></SelectTrigger>
                 <SelectContent>
-                  {careers.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
+                  {careerOptions.map(c => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="edit-category">Categoría</Label>
-              <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {categories.map((cat) => (
-                    <SelectItem key={cat} value={cat}>
-                      {cat}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
+              <Select value={form.category} onValueChange={(v) => setForm(p => ({ ...p, category: v }))}>
+                <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
+                <SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="edit-stock">Stock</Label>
-              <Input
-                id="edit-stock"
-                type="number"
-                value={form.stock}
-                onChange={(e) => setForm({ ...form, stock: e.target.value })}
-              />
+              <Input id="edit-stock" type="number" value={form.stock} onChange={(e) => setForm(p => ({ ...p, stock: e.target.value }))} />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="edit-image">URL de la imagen</Label>
-            <div className="flex gap-2">
-              <Input
-                id="edit-image"
-                value={form.image}
-                onChange={(e) => setForm({ ...form, image: e.target.value })}
-              />
-              <Button variant="outline" size="icon" type="button">
-                <Upload className="h-4 w-4" />
-              </Button>
-            </div>
+            <Label>Imagen</Label>
+            <Input type="file" accept="image/*" onChange={onFile} />
+            {form.image && (<img src={form.image} alt="preview" className="h-24 w-24 mt-2 rounded object-cover" />)}
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
           <Button onClick={onSubmit}>Guardar Cambios</Button>
         </DialogFooter>
       </DialogContent>

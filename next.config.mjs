@@ -5,25 +5,30 @@ const nextConfig = {
   images: { unoptimized: true },
 
   async rewrites() {
-    const base = process.env.NEXT_PUBLIC_AUTH_API_URL; // p.ej. http://localhost:8001 o https://auth.ucb.com
-    if (!base) {
-      console.warn("[next.config] WARNING: AUTH_API_URL no está definida");
-      return [];
-    }
+    const AUTH = process.env.NEXT_PUBLIC_AUTH_API_URL;
+    const PRODUCTS = process.env.NEXT_PUBLIC_PRODUCTS_API_URL;
     return [
       {
         source: "/api/auth/:path*",
-        destination: `${base}/auth/:path*`,
+        destination: `${AUTH}/auth/:path*`,
       },
       {
         source: "/api/users/:path*",
-        destination: `${base}/users/:path*`,
+        destination: `${AUTH}/users/:path*`,
       },
       // si tu health check está en el mismo backend:
       {
         source: "/api/health",
-        destination: `${base}/health`,
+        destination: `${AUTH}/health`,
       },
+      {
+        source: "/api/careers/:path*",
+        destination: `${AUTH}/careers/:path*`,
+      },
+      {
+        source: "/api/products/:path*", 
+        destination: `${PRODUCTS}/api/products/:path*`
+      }
     ];
   },
 };

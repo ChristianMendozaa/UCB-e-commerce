@@ -4,7 +4,8 @@ import { FC } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import type { Order, Product, User } from "@/lib/database"
+import type { Order, User } from "@/lib/database"
+import type { Product } from "@/lib/products"
 
 type Props = {
   open: boolean

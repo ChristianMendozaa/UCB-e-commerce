@@ -7,11 +7,38 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
+  /** Rol primario, solo para conveniencia visual */
   role: "student" | "teacher" | "admin";
-  career?: string;
+  /** Lista completa de roles (fuente: colección roles) */
+  roles: Array<"student" | "teacher" | "admin">;
+  /** Carreras donde es admin (p.ej. ["SIS","ADM"]) */
+  admin_careers: string[];
+  /** Superadmin de plataforma */
+  platform_admin: boolean;
+
+  /** Compat: antes tenías career simple */
+  career?: string; // si aún lo usas en UI legada
   photoURL?: string;
-  is_admin?: boolean;
+  is_admin?: boolean; // sigue viniendo desde /me
 }
+
+type MeResp = {
+  uid: string;
+  email?: string;
+  displayName?: string;
+  photoURL?: string;
+
+  role?: "student" | "teacher" | "admin";
+  roles?: Array<"student" | "teacher" | "admin">;
+  is_admin?: boolean;
+
+  // NUEVO
+  careers?: string[];          // 👈
+  admin_careers?: string[];    // compat
+  platform_admin?: boolean;
+
+  profile?: { role?: "student" | "teacher" | "admin"; career?: string };
+};
 
 function getFirebaseAuth() {
   // Carga dinámica (evita problemas de SSR)
@@ -85,6 +112,50 @@ class AuthService {
     }
   }
 
+  /** Lista usuarios (requiere admin o platform_admin) */
+  async listUsers(): Promise<Array<{
+    uid: string;
+    email?: string;
+    displayName?: string;
+    photoURL?: string;
+    roles: string[];
+    role: string;
+    admin_careers: string[];
+    platform_admin: boolean;
+  }>> {
+    const res = await apiFetch<{ ok: boolean; users: any[] }>("/api/users", { method: "GET" });
+    return res.users ?? [];
+  }
+
+  /** Hace admin a un usuario para una carrera */
+  async makeAdmin(targetUid: string, career: string): Promise<void> {
+    await apiFetch("/api/users/roles/make_admin", {
+      method: "POST",
+      body: JSON.stringify({ uid: targetUid, career }),
+    });
+  }
+
+  // auth.ts (dentro de class AuthService)
+  async removeAdmin(targetUid: string, career: string): Promise<void> {
+    await apiFetch("/api/users/roles/remove_admin", {
+      method: "POST",
+      body: JSON.stringify({ uid: targetUid, career }),
+    });
+  }
+
+  // Lista de carreras desde el backend (usa /api/careers)
+  async getCareers(): Promise<string[]> {
+    try {
+      // acepta dos formatos: { ok, careers } o string[]
+      const res = await apiFetch<any>("/api/careers", { method: "GET" });
+      if (Array.isArray(res)) return res as string[];
+      if (Array.isArray(res?.careers)) return res.careers as string[];
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
   /** Login con Google -> backend fija cookie __session */
   async googleLogin(): Promise<AuthUser> {
     const { auth, provider, authMod } = await getFirebaseAuth();
@@ -113,37 +184,33 @@ class AuthService {
 
   /** Obtiene /users/me desde el backend */
   async fetchMe(): Promise<AuthUser> {
-    type MeResp = {
-      uid: string;
-      email?: string;
-      displayName?: string;
-      photoURL?: string;
-      role?: "student" | "teacher" | "admin";
-      is_admin?: boolean;
-      profile?: { role?: "student" | "teacher" | "admin"; career?: string };
-    };
-
     const data = await apiFetch<MeResp>("/api/users/me", { method: "GET" });
 
     const role = data.role ?? data.profile?.role ?? "student";
+    const roles = (data.roles?.length ? data.roles : []) as AuthUser["roles"] ?? ["student"];
+
+    // preferimos 'careers', si no, 'admin_careers', si no, el 'career' legado
+    const careers = data.careers
+      ?? data.admin_careers
+      ?? (data.profile?.career ? [data.profile.career] : []);
 
     const user: AuthUser = {
       id: data.uid,
       email: data.email ?? "",
       name: data.displayName ?? data.email ?? "Usuario",
       role,
-      career: data.profile?.career,
+      roles,
+      admin_careers: careers ?? [],      // 👈 usamos el array
+      platform_admin: !!data.platform_admin,
       photoURL: data.photoURL,
-      is_admin: data.is_admin,
+      is_admin: !!data.is_admin,
+      career: data.profile?.career,      // compat con UI legada
     };
 
-    // Guardar en memoria y localStorage
     this.currentUser = user;
     if (typeof window !== "undefined") {
-      const { role, is_admin, ...safeUser } = user;
-      localStorage.setItem("authUser", JSON.stringify(safeUser));
+      localStorage.setItem("authUser", JSON.stringify(user));
     }
-
     return user;
   }
 
@@ -190,8 +257,25 @@ class AuthService {
 
   hasRole(role: AuthUser["role"]): boolean {
     if (!this.currentUser) return false;
-    if (this.currentUser.is_admin || this.currentUser.role === "admin") return true;
-    return this.currentUser.role === role;
+    const u = this.currentUser;
+
+    // superadmin siempre pasa
+    if (u.platform_admin) return true;
+
+    // si es admin, también pasa
+    if (u.is_admin || u.role === "admin" || (u.roles?.includes("admin"))) return true;
+
+    // en caso contrario, verifica rol exacto
+    return u.role === role || (u.roles?.includes(role) ?? false);
+  }
+
+  canManageCareer(career: string): boolean {
+    if (!this.currentUser) return false;
+    const u = this.currentUser;
+    // superadmin puede todo
+    if (u.platform_admin) return true;
+    // admin de la carrera específica
+    return (u.roles?.includes("admin") ?? false) && u.admin_careers?.includes(career);
   }
 }
 
@@ -232,5 +316,6 @@ export function useAuth() {
     logout,
     isAuthenticated: !!user,
     hasRole: authService.hasRole.bind(authService),
+    canManageCareer: authService.canManageCareer.bind(authService),
   };
 }

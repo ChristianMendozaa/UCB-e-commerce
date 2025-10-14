@@ -9,8 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Package, Plus, Search, MoreHorizontal, Edit, Trash2, Eye } from "lucide-react"
-import type { Product } from "@/lib/database"
-
+import type { Product } from "@/lib/products"
 type Props = {
   // data
   products: Product[]

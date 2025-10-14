@@ -22,9 +22,42 @@ import {
   Clock,
   Truck,
 } from "lucide-react"
-import type { Product, Order, User } from "@/lib/database"
+import type { Order, User } from "@/lib/database"
 import { db } from "@/lib/database"
 import { useToast } from "@/hooks/use-toast"
+import { authService } from "@/lib/auth"
+import CareerPickerModal from "./modals/users/CareerPickerModal";
+import type { Product, ProductFormState } from "@/lib/products"
+import { productsApi } from "@/lib/products"
+import { useAuth } from "@/lib/auth";
+
+type CareerAction = { mode: "make" | "remove"; userId: string; adminCareers?: string[] } | null;
+function mapApiUserToUI(u: {
+  uid: string
+  email?: string
+  displayName?: string
+  photoURL?: string
+  roles: string[]
+  role: string
+  admin_careers: string[]
+  platform_admin: boolean
+}): User {
+  return {
+    id: u.uid,
+    name: u.displayName || u.email || "Usuario",
+    email: u.email || "",
+    role: (u.role as any) || "student",
+    career: u.admin_careers?.[0] || "",       // compat con tu UI (una sola)
+    createdAt: new Date(),      // si tu tipo User lo exige
+    // (opcional) guarda también campos extendidos que quieras usar en el modal
+    // @ts-ignore
+    adminCareers: u.admin_careers,
+    // @ts-ignore
+    platformAdmin: u.platform_admin,
+    // @ts-ignore
+    rolesFull: u.roles,
+  }
+}
 
 interface DashboardStats {
   totalProducts: number
@@ -36,6 +69,13 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard() {
+
+  const { user } = useAuth();
+  const lockedCareer = user?.platform_admin ? null : (user?.admin_careers?.[0] ?? null);
+  const lockedCareerForEdit =
+    user?.platform_admin ? null :
+      (user?.admin_careers?.length === 1 ? user.admin_careers[0] : null);
+
   const [stats, setStats] = useState<DashboardStats>({
     totalProducts: 0,
     totalOrders: 0,
@@ -73,15 +113,24 @@ export default function AdminDashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [productToDelete, setProductToDelete] = useState<Product | null>(null)
 
-  const [productForm, setProductForm] = useState({
-    name: "",
-    description: "",
-    price: "",
-    category: "",
-    career: "",
-    stock: "",
-    image: "",
+  const [careerAction, setCareerAction] = useState<CareerAction>(null);
+  const [careerModalOpen, setCareerModalOpen] = useState(false);
+  const [careerOptions, setCareerOptions] = useState<string[]>([]);
+  const [realCareers, setRealCareers] = useState<string[]>([]);
+
+  // estado de carga por usuario/acción (para spinner en la tabla)
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [busyMode, setBusyMode] = useState<"make" | "remove" | null>(null);
+
+  // estado de carga en el modal: cargar opciones y guardar acción
+  const [isCareersFetching, setIsCareersFetching] = useState(false);
+  const [isRoleSaving, setIsRoleSaving] = useState(false);
+
+  const [productForm, setProductForm] = useState<ProductFormState>({
+    name: "", description: "", price: "", category: "", career: "", stock: "",
+    image: "", imageFile: null,
   })
+
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [isUserModalOpen, setIsUserModalOpen] = useState(false)
@@ -91,7 +140,6 @@ export default function AdminDashboard() {
 
   const { toast } = useToast()
 
-  const careers = db.getCareers()
   const categories = ["Tecnología", "Libros", "Electrónica", "Material Educativo", "Componentes"]
 
   useEffect(() => {
@@ -109,27 +157,49 @@ export default function AdminDashboard() {
   useEffect(() => {
     filterUsers()
   }, [users, userSearchTerm, selectedUserRole])
+  // Carga inicial de carreras reales
+  useEffect(() => {
+    (async () => {
+      if (!careerModalOpen) return;
+      if (careerAction?.mode !== "make") return;
+
+      setIsCareersFetching(true);
+      try {
+        const apiCareers = await authService.getCareers(); // GET /api/careers
+        const normalized = Array.isArray(apiCareers)
+          ? apiCareers.map((c: any) => (typeof c === "string" ? c : c?.code)).filter(Boolean)
+          : [];
+        setCareerOptions(normalized);
+      } catch (e) {
+        console.warn("No se pudo cargar careers al abrir modal:", e);
+        setCareerOptions([]); // el modal te deja escribir nueva si no hay
+      } finally {
+        setIsCareersFetching(false);
+      }
+    })();
+  }, [careerModalOpen, careerAction]);
 
   const loadDashboardData = async () => {
     setIsLoading(true)
     try {
       await addSampleOrders()
 
-      // Load all data
-      const [productsData, ordersData, usersData] = await Promise.all([
-        db.getProducts(),
-        db.getOrders(),
-        db.getAllUsers(),
-      ])
+      // 🔁 Productos desde backend real
+      const productsData = await productsApi.listProducts()
+
+      // 🔁 Pedidos (mock) y usuarios (auth backend como ya tenías)
+      const [ordersData] = await Promise.all([db.getOrders()])
+      const apiUsers = await authService.listUsers()
+      const usersData = apiUsers.map(mapApiUserToUI)
 
       setProducts(productsData)
       setOrders(ordersData)
       setUsers(usersData)
 
-      // Calculate stats
+      // (stats igual que antes)
       const totalRevenue = ordersData.reduce((sum, order) => sum + order.total, 0)
-      const pendingOrders = ordersData.filter((order) => order.status === "pending").length
-      const lowStock = productsData.filter((product) => product.stock <= 5)
+      const pendingOrders = ordersData.filter((o) => o.status === "pending").length
+      const lowStock = productsData.filter((p) => p.stock <= 5)
 
       setStats({
         totalProducts: productsData.length,
@@ -139,20 +209,11 @@ export default function AdminDashboard() {
         pendingOrders,
         lowStockProducts: lowStock.length,
       })
-
-      // Set recent orders (last 5)
-      const sortedOrders = ordersData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      setRecentOrders(sortedOrders.slice(0, 5))
-
-      // Set low stock products
+      setRecentOrders(ordersData.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 5))
       setLowStockProducts(lowStock.slice(0, 5))
     } catch (error) {
       console.error("Error loading dashboard data:", error)
-      toast({
-        title: "Error",
-        description: "No se pudieron cargar los datos del panel",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "No se pudieron cargar los datos del panel", variant: "destructive" })
     } finally {
       setIsLoading(false)
     }
@@ -269,91 +330,62 @@ export default function AdminDashboard() {
       career: product.career,
       stock: product.stock.toString(),
       image: product.image,
+      imageFile: null,
     })
     setIsEditModalOpen(true)
   }
 
   const handleDeleteProduct = async (product: Product) => {
     try {
-      await db.deleteProduct(product.id)
-      setProducts(products.filter((p) => p.id !== product.id))
+      await productsApi.deleteProduct(product.id)
+      setProducts(products.filter(p => p.id !== product.id))
       setProductToDelete(null)
-      toast({
-        title: "Producto eliminado",
-        description: "El producto ha sido eliminado exitosamente",
-      })
+      toast({ title: "Producto eliminado", description: "El producto ha sido eliminado exitosamente" })
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "No se pudo eliminar el producto",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "No se pudo eliminar el producto", variant: "destructive" })
     }
   }
 
   const handleAddProduct = async () => {
     try {
-      const newProduct = await db.createProduct({
+      const newProduct = await productsApi.createProduct({
         name: productForm.name,
         description: productForm.description,
-        price: Number.parseFloat(productForm.price),
+        price: Number(productForm.price),
         category: productForm.category,
         career: productForm.career,
-        stock: Number.parseInt(productForm.stock),
-        image: productForm.image || "/placeholder.svg",
+        stock: Number(productForm.stock),
+        imageFile: productForm.imageFile || null,
       })
       setProducts([...products, newProduct])
       setIsAddModalOpen(false)
       setProductForm({
-        name: "",
-        description: "",
-        price: "",
-        category: "",
-        career: "",
-        stock: "",
-        image: "",
+        name: "", description: "", price: "", category: "", career: "", stock: "",
+        image: "", imageFile: null,
       })
-      toast({
-        title: "Producto creado",
-        description: "El producto ha sido creado exitosamente",
-      })
+      toast({ title: "Producto creado", description: "El producto ha sido creado exitosamente" })
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "No se pudo crear el producto",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "No se pudo crear el producto", variant: "destructive" })
     }
   }
 
   const handleUpdateProduct = async () => {
     if (!selectedProduct) return
-
     try {
-      const updatedProduct = await db.updateProduct(selectedProduct.id, {
+      const updated = await productsApi.updateProduct(selectedProduct.id, {
         name: productForm.name,
         description: productForm.description,
-        price: Number.parseFloat(productForm.price),
+        price: Number(productForm.price),
         category: productForm.category,
         career: productForm.career,
-        stock: Number.parseInt(productForm.stock),
-        image: productForm.image,
+        stock: Number(productForm.stock),
+        imageFile: productForm.imageFile || null, // si hay file, reemplaza
       })
-
-      if (updatedProduct) {
-        setProducts(products.map((p) => (p.id === selectedProduct.id ? updatedProduct : p)))
-        setIsEditModalOpen(false)
-        toast({
-          title: "Producto actualizado",
-          description: "El producto ha sido actualizado exitosamente",
-        })
-      }
+      setProducts(products.map(p => (p.id === selectedProduct.id ? updated : p)))
+      setIsEditModalOpen(false)
+      toast({ title: "Producto actualizado", description: "El producto ha sido actualizado exitosamente" })
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "No se pudo actualizar el producto",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "No se pudo actualizar el producto", variant: "destructive" })
     }
   }
 
@@ -363,29 +395,80 @@ export default function AdminDashboard() {
   }
 
   const toggleUserRole = async (userId: string, currentRole: string) => {
-    const newRole = currentRole === "admin" ? "student" : "admin"
+    if (currentRole !== "admin") {
+      // ➕ Hacer admin → abre modal y carga catálogo (el useEffect de arriba lo hace)
+      setCareerAction({ mode: "make", userId });
+      setCareerModalOpen(true);
+      return;
+    }
+
+    // 🔻 Quitar admin
+    const target = users.find((x) => x.id === userId);
+    const adminCareers: string[] = (target as any)?.adminCareers || [];
+
+    if (adminCareers.length === 0) {
+      toast({ title: "Sin carreras", description: "Este usuario no administra ninguna carrera." });
+      return;
+    }
+
+    if (adminCareers.length === 1) {
+      // quitar directo sin modal → spinner en fila
+      setBusyUserId(userId);
+      setBusyMode("remove");
+      try {
+        await authService.removeAdmin(userId, adminCareers[0]);
+        toast({ title: "Rol actualizado", description: `Se quitó admin en ${adminCareers[0]}` });
+
+        const apiUsers = await authService.listUsers();
+        const usersData = apiUsers.map(mapApiUserToUI);
+        setUsers(usersData);
+      } catch (e) {
+        console.error(e);
+        toast({ title: "Error", description: "No se pudo quitar el rol de administrador", variant: "destructive" });
+      } finally {
+        setBusyUserId(null);
+        setBusyMode(null);
+      }
+      return;
+    }
+
+    // 2+ carreras → abre modal SOLO con sus carreras administradas
+    setCareerOptions(adminCareers);
+    setCareerAction({ mode: "remove", userId, adminCareers });
+    setCareerModalOpen(true);
+  };
+
+  const handleCareerConfirm = async (career: string) => {
+    if (!careerAction) return;
+
+    setIsRoleSaving(true);
+    setBusyUserId(careerAction.userId);
+    setBusyMode(careerAction.mode);
 
     try {
-      // Update in database (simulated)
-      const userIndex = users.findIndex((u) => u.id === userId)
-      if (userIndex !== -1) {
-        const updatedUsers = [...users]
-        updatedUsers[userIndex] = { ...updatedUsers[userIndex], role: newRole as any }
-        setUsers(updatedUsers)
-
-        toast({
-          title: "Rol actualizado",
-          description: `El usuario ahora es ${newRole === "admin" ? "administrador" : "estudiante"}`,
-        })
+      if (careerAction.mode === "make") {
+        await authService.makeAdmin(careerAction.userId, career);
+        toast({ title: "Rol actualizado", description: `Usuario promovido a admin de ${career}` });
+      } else {
+        await authService.removeAdmin(careerAction.userId, career);
+        toast({ title: "Rol actualizado", description: `Se quitó admin en ${career}` });
       }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "No se pudo actualizar el rol del usuario",
-        variant: "destructive",
-      })
+
+      // refrescar usuarios
+      const apiUsers = await authService.listUsers();
+      const usersData = apiUsers.map(mapApiUserToUI);
+      setUsers(usersData);
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Error", description: "No se pudo actualizar el rol del usuario", variant: "destructive" });
+    } finally {
+      setIsRoleSaving(false);
+      setBusyUserId(null);
+      setBusyMode(null);
+      setCareerModalOpen(false);
+      setCareerAction(null);
     }
-  }
+  };
 
   const handleViewOrder = (order: Order) => {
     setSelectedOrder(order)
@@ -555,10 +638,13 @@ export default function AdminDashboard() {
                 setSelectedCareer={setSelectedCareer}
                 selectedCategory={selectedCategory}
                 setSelectedCategory={setSelectedCategory}
-                careers={careers}
+                careers={realCareers}
                 categories={categories}
                 getStockBadge={getStockBadge}
-                onOpenAdd={() => setIsAddModalOpen(true)}
+                onOpenAdd={() => {
+                  setProductForm(p => ({ ...p, career: lockedCareer ?? p.career }));
+                  setIsAddModalOpen(true);
+                }}
                 onView={(p) => { setSelectedProduct(p); setIsProductModalOpen(true) }}
                 onEdit={(p) => {
                   setSelectedProduct(p)
@@ -567,9 +653,11 @@ export default function AdminDashboard() {
                     description: p.description,
                     price: p.price.toString(),
                     category: p.category,
-                    career: p.career,
+                    // si está bloqueado, imponemos esa carrera; si no, dejamos la del producto
+                    career: lockedCareerForEdit ?? p.career,
                     stock: p.stock.toString(),
                     image: p.image,
+                    imageFile: null,
                   })
                   setIsEditModalOpen(true)
                 }}
@@ -604,6 +692,9 @@ export default function AdminDashboard() {
                 setSelectedUserRole={setSelectedUserRole}
                 onView={(u) => { setSelectedUser(u); setIsUserModalOpen(true) }}
                 onToggleRole={toggleUserRole}
+                // NUEVO:
+                busyUserId={busyUserId}
+                busyMode={busyMode}
               />
             </TabsContent>
 
@@ -615,9 +706,10 @@ export default function AdminDashboard() {
           onOpenChange={setIsAddModalOpen}
           form={productForm}
           setForm={setProductForm}
-          careers={careers}
+          careers={realCareers}
           categories={categories}
           onSubmit={handleAddProduct}
+          lockCareer={lockedCareer}
         />
 
         <ProductEditModal
@@ -625,9 +717,10 @@ export default function AdminDashboard() {
           onOpenChange={setIsEditModalOpen}
           form={productForm}
           setForm={setProductForm}
-          careers={careers}
+          careers={realCareers}
           categories={categories}
           onSubmit={handleUpdateProduct}
+          lockCareer={lockedCareerForEdit}
         />
 
         <ProductViewModal
@@ -647,6 +740,18 @@ export default function AdminDashboard() {
           open={isUserModalOpen}
           onOpenChange={setIsUserModalOpen}
           user={selectedUser}
+        />
+
+        <CareerPickerModal
+          open={careerModalOpen}
+          mode={careerAction?.mode === "remove" ? "remove" : "make"}
+          careers={careerOptions}
+          adminCareers={careerAction?.adminCareers}
+          onClose={() => { setCareerModalOpen(false); setCareerAction(null); }}
+          onConfirm={handleCareerConfirm}
+          // NUEVO:
+          isFetching={isCareersFetching}
+          isSaving={isRoleSaving}
         />
 
         <OrderViewModal

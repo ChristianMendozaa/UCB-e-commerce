@@ -11,7 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import type { Product } from "@/lib/database"
+import type { Product } from "@/lib/products"
 
 type Props = {
   product: Product | null

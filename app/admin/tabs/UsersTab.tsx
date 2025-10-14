@@ -8,23 +8,21 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Users as UsersIcon, Search, MoreHorizontal, Eye, UserCheck, UserX, Shield, ShieldCheck } from "lucide-react"
+import { Users as UsersIcon, Search, MoreHorizontal, Eye, UserCheck, UserX, Shield, ShieldCheck, Loader2 } from "lucide-react"
 import type { User } from "@/lib/database"
 
 type Props = {
-  // data
   users: User[]
   filteredUsers: User[]
-
-  // filtros controlados
   userSearchTerm: string
   setUserSearchTerm: (v: string) => void
   selectedUserRole: string
   setSelectedUserRole: (v: string) => void
-
-  // acciones
   onView: (user: User) => void
   onToggleRole: (userId: string, currentRole: string) => void
+  // NUEVO:
+  busyUserId?: string | null
+  busyMode?: "make" | "remove" | null
 }
 
 const UsersTab: FC<Props> = ({
@@ -36,6 +34,9 @@ const UsersTab: FC<Props> = ({
   setSelectedUserRole,
   onView,
   onToggleRole,
+  // 👇 ¡faltaban estos dos!
+  busyUserId,
+  busyMode,
 }) => {
   return (
     <Card>
@@ -134,25 +135,37 @@ const UsersTab: FC<Props> = ({
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4" />
+                          <Button
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            disabled={busyUserId === user.id}
+                            aria-label="Acciones"
+                          >
+                            {busyUserId === user.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <MoreHorizontal className="h-4 w-4" />
+                            )}
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => onView(user)}>
+                          <DropdownMenuItem disabled={busyUserId === user.id} onClick={() => onView(user)}>
                             <Eye className="mr-2 h-4 w-4" />
                             Ver perfil
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => onToggleRole(user.id, user.role)}>
+                          <DropdownMenuItem
+                            disabled={busyUserId === user.id}
+                            onClick={() => onToggleRole(user.id, user.role)}
+                          >
                             {user.role === "admin" ? (
                               <>
                                 <UserX className="mr-2 h-4 w-4" />
-                                Quitar admin
+                                {busyUserId === user.id && busyMode === "remove" ? "Quitando..." : "Quitar admin"}
                               </>
                             ) : (
                               <>
                                 <UserCheck className="mr-2 h-4 w-4" />
-                                Hacer admin
+                                {busyUserId === user.id && busyMode === "make" ? "Haciendo..." : "Hacer admin"}
                               </>
                             )}
                           </DropdownMenuItem>
