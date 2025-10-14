@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from firebase_client import db
 from config import MAX_B64_BYTES, FIREBASE_COLLECTION
 from utils.utils import calc_b64_size, convert_to_webp, encode_b64
+from urllib.parse import quote
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
