@@ -76,7 +76,6 @@ async def list_images():
         logger.exception("Error en list_images")
         raise HTTPException(500, detail="No se pudo listar las imágenes")
 
-
 @router.get("/{image_id}", summary="Descargar imagen (raw con extensión)")
 async def get_image(image_id: str):
     """
@@ -97,9 +96,24 @@ async def get_image(image_id: str):
             raise HTTPException(404, "Datos de imagen incompletos")
 
         raw = base64.b64decode(b64)
+        
+        # --- CAMBIO AQUÍ PARA SOPORTAR NOMBRES CON CARACTERES ESPECIALES ---
+        # 1. Creamos una versión ASCII-safe del nombre para el parámetro 'filename' 
+        #    (ignorando los caracteres no-ASCII).
+        ascii_filename = filename.encode('ascii', 'ignore').decode('ascii')
+        
+        # 2. Codificamos el nombre real en UTF-8 y URL-encoding para 'filename*' 
+        #    (el estándar para caracteres no-ASCII).
+        utf8_filename_encoded = quote(filename)
+
         headers = {
-            "Content-Disposition": f'inline; filename="{filename}"'
+            "Content-Disposition": (
+                f'inline; filename="{ascii_filename}"; '
+                f"filename*=utf-8''{utf8_filename_encoded}"
+            )
         }
+        # -------------------------------------------------------------------
+        
         return StreamingResponse(
             BytesIO(raw),
             media_type=content_type,
