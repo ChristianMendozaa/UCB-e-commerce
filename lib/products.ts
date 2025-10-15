@@ -91,7 +91,7 @@ export async function listPublicProducts(params?: ListParams): Promise<ProductLi
 // Autenticada: GET /api/products
 export async function listProducts(params?: ListParams): Promise<ProductList> {
   const qp = buildQuery(params)
-  const data = await http<ProductList>(`/api/products${qp}`, { method: "GET" })
+  const data = await http<ProductList>(`/api/products${qp}`, { method: "GET", credentials: "include" })
   return asList(data)
 }
 

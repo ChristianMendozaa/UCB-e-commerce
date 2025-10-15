@@ -189,7 +189,7 @@ export default function AdminDashboard() {
     setIsLoading(true)
     try {
       // Productos desde backend real (como ya tienes)
-      const productsPage = await productsApi.listProducts() // ahora devuelve { items, next_cursor }
+      const productsPage = await productsApi.listProducts() // ahora devuelve { items, next_cursor } 
       const productsData = productsPage.items
 
       // Pedidos desde backend real
