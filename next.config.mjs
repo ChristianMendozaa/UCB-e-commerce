@@ -17,11 +17,6 @@ const nextConfig = {
         source: "/api/users/:path*",
         destination: `${AUTH}/users/:path*`,
       },
-      // si tu health check está en el mismo backend:
-      {
-        source: "/api/health",
-        destination: `${AUTH}/health`,
-      },
       {
         source: "/api/careers/:path*",
         destination: `${AUTH}/careers/:path*`,
@@ -35,6 +30,17 @@ const nextConfig = {
         destination: `${ORDERS}/orders/:path*`
       },
     ];
+  },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+          { key: "Cross-Origin-Embedder-Policy", value: "unsafe-none" },
+        ],
+      },
+    ]
   },
 };
 
