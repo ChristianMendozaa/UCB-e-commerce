@@ -1,4 +1,5 @@
 // src/lib/products.ts
+
 export type Product = {
   id: string
   name: string
@@ -49,6 +50,9 @@ export type ProductCreateJSON = {
 
 export type ProductUpdateJSON = Partial<ProductCreateJSON>
 
+// ===== opts para inyectar headers (Authorization, etc.) =====
+export type FetchOpts = { headers?: HeadersInit }
+
 // ===== helpers =====
 function asProduct(p: any): Product {
   return { ...p, createdAt: p?.createdAt ?? new Date().toISOString() }
@@ -69,15 +73,24 @@ function buildQuery(params?: Record<string, any>) {
   return s ? `?${s}` : ""
 }
 
-async function http<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const res = await fetch(input, { credentials: "include", ...init })
+// --- parser robusto: detecta HTML por rewrites rotos ---
+async function parseJsonRobust<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text().catch(() => "")
     throw new Error(`HTTP ${res.status} ${res.statusText}: ${body}`)
   }
-  // puede venir 204 (sin body)
   if (res.status === 204) return undefined as unknown as T
-  return (await res.json()) as T
+  const ct = res.headers.get("content-type") || ""
+  const text = await res.text()
+  if (text && !ct.includes("application/json")) {
+    throw new Error(`Non-JSON response: ${text.slice(0, 250)}`)
+  }
+  return text ? (JSON.parse(text) as T) : (undefined as unknown as T)
+}
+
+async function http<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const res = await fetch(input, { credentials: "include", ...init })
+  return parseJsonRobust<T>(res)
 }
 
 // ===== Listados =====
@@ -88,15 +101,21 @@ export async function listPublicProducts(params?: ListParams): Promise<ProductLi
   return asList(data)
 }
 
-// Autenticada: GET /api/products
-export async function listProducts(params?: ListParams): Promise<ProductList> {
+// Autenticada: GET /api/products  (pasa headers aquí)
+export async function listProducts(params?: ListParams, opts: FetchOpts = {}): Promise<ProductList> {
   const qp = buildQuery(params)
   try {
-    const data = await http<ProductList>(`/api/products${qp}`, { method: "GET", credentials: "include" })
+    const res = await fetch(`/api/products${qp}`, {
+      method: "GET",
+      credentials: "include",
+      headers: opts.headers, // <-- Authorization aquí
+    })
+    const data = await parseJsonRobust<ProductList>(res)
     return asList(data)
   } catch (err: any) {
-    // si en prod llega 401, caemos a listado público
-    if (String(err?.message || "").startsWith("HTTP 401")) {
+    const msg = String(err?.message || "")
+    if (msg.startsWith("HTTP 401") || msg.includes("Non-JSON response")) {
+      // ➜ caer al listado público
       const pub = await listPublicProducts(params)
       return pub
     }
@@ -117,24 +136,30 @@ export async function listAllPublicProducts(params?: Omit<ListParams, "cursor">)
 }
 
 // ===== Detalle =====
-// GET /api/products/{id}
+// GET /api/products/{id}  (público)
 export async function getProduct(id: string): Promise<Product> {
   const data = await http<Product>(`/api/products/${id}`, { method: "GET" })
   return asProduct(data)
 }
 
 // ===== Crear =====
-// POST JSON /api/products
-export async function createProductJSON(payload: ProductCreateJSON): Promise<Product> {
-  const data = await http<Product>(`/api/products`, {
+// POST JSON /api/products (privado)
+export async function createProductJSON(payload: ProductCreateJSON, opts: FetchOpts = {}): Promise<Product> {
+  // mezclamos headers del caller con content-type
+  const headers = new Headers(opts.headers || {})
+  headers.set("content-type", "application/json")
+
+  const res = await fetch(`/api/products`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    credentials: "include",
+    headers,
     body: JSON.stringify(payload),
   })
+  const data = await parseJsonRobust<Product>(res)
   return asProduct(data)
 }
 
-// POST FORM /api/products/form (con archivo o image_url)
+// POST FORM /api/products/form (privado; con archivo o image_url)
 export async function createProductForm(input: {
   name: string
   price: number
@@ -145,7 +170,7 @@ export async function createProductForm(input: {
   image_url?: string | null
   imageFile?: File | null
   convert_webp?: boolean
-}): Promise<Product> {
+}, opts: FetchOpts = {}): Promise<Product> {
   const fd = new FormData()
   fd.append("name", input.name)
   fd.append("price", String(input.price))
@@ -157,23 +182,33 @@ export async function createProductForm(input: {
   fd.append("convert_webp", String(input.convert_webp ?? true))
   if (input.imageFile) fd.append("image_file", input.imageFile)
 
-  const res = await fetch(`/api/products/form`, { method: "POST", credentials: "include", body: fd })
-  if (!res.ok) throw new Error(await res.text())
-  return asProduct(await res.json())
-}
-
-// ===== Actualizar =====
-// PUT JSON /api/products/{id}
-export async function updateProductJSON(id: string, payload: ProductUpdateJSON): Promise<Product> {
-  const data = await http<Product>(`/api/products/${id}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
+  const res = await fetch(`/api/products/form`, {
+    method: "POST",
+    credentials: "include",
+    headers: opts.headers, // <-- Authorization aquí (NO pongas content-type con FormData)
+    body: fd,
   })
+  const data = await parseJsonRobust<Product>(res)
   return asProduct(data)
 }
 
-// PUT FORM /api/products/{id}/form
+// ===== Actualizar =====
+// PUT JSON /api/products/{id} (privado)
+export async function updateProductJSON(id: string, payload: ProductUpdateJSON, opts: FetchOpts = {}): Promise<Product> {
+  const headers = new Headers(opts.headers || {})
+  headers.set("content-type", "application/json")
+
+  const res = await fetch(`/api/products/${id}`, {
+    method: "PUT",
+    credentials: "include",
+    headers,
+    body: JSON.stringify(payload),
+  })
+  const data = await parseJsonRobust<Product>(res)
+  return asProduct(data)
+}
+
+// PUT FORM /api/products/{id}/form (privado)
 export async function updateProductForm(
   id: string,
   input: {
@@ -187,6 +222,7 @@ export async function updateProductForm(
     imageFile?: File | null
     convert_webp?: boolean
   },
+  opts: FetchOpts = {}
 ): Promise<Product> {
   const fd = new FormData()
   if (input.name !== undefined) fd.append("name", input.name)
@@ -199,16 +235,25 @@ export async function updateProductForm(
   fd.append("convert_webp", String(input.convert_webp ?? true))
   if (input.imageFile) fd.append("image_file", input.imageFile)
 
-  const res = await fetch(`/api/products/${id}/form`, { method: "PUT", credentials: "include", body: fd })
-  if (!res.ok) throw new Error(await res.text())
-  return asProduct(await res.json())
+  const res = await fetch(`/api/products/${id}/form`, {
+    method: "PUT",
+    credentials: "include",
+    headers: opts.headers, // <-- Authorization aquí
+    body: fd,
+  })
+  const data = await parseJsonRobust<Product>(res)
+  return asProduct(data)
 }
 
 // ===== Eliminar =====
-// DELETE /api/products/{id}
-export async function deleteProduct(id: string): Promise<void> {
-  const res = await fetch(`/api/products/${id}`, { method: "DELETE", credentials: "include" })
-  if (!res.ok) throw new Error(await res.text())
+// DELETE /api/products/{id} (privado)
+export async function deleteProduct(id: string, opts: FetchOpts = {}): Promise<void> {
+  const res = await fetch(`/api/products/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: opts.headers, // <-- Authorization aquí
+  })
+  await parseJsonRobust<void>(res)
 }
 
 // Export de conveniencia
