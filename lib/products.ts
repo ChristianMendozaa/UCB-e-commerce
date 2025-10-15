@@ -91,8 +91,17 @@ export async function listPublicProducts(params?: ListParams): Promise<ProductLi
 // Autenticada: GET /api/products
 export async function listProducts(params?: ListParams): Promise<ProductList> {
   const qp = buildQuery(params)
-  const data = await http<ProductList>(`/api/products${qp}`, { method: "GET", credentials: "include" })
-  return asList(data)
+  try {
+    const data = await http<ProductList>(`/api/products${qp}`, { method: "GET", credentials: "include" })
+    return asList(data)
+  } catch (err: any) {
+    // si en prod llega 401, caemos a listado público
+    if (String(err?.message || "").startsWith("HTTP 401")) {
+      const pub = await listPublicProducts(params)
+      return pub
+    }
+    throw err
+  }
 }
 
 // Helper por si quieres traer TODO paginando (cuidado con tamaño):
