@@ -170,14 +170,6 @@ export default function ProductDetailPage() {
                 <Badge variant="outline">{product.category}</Badge>
               </div>
               <h1 className="text-3xl font-bold mb-2">{product.name}</h1>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="flex items-center">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Star key={i} className="h-4 w-4 fill-primary text-primary" />
-                  ))}
-                </div>
-                <span className="text-sm text-muted-foreground">(4.8) • 24 reseñas</span>
-              </div>
               <p className="text-3xl font-bold text-primary mb-4">Bs. {Number(product.price).toFixed(2)}</p>
             </div>
 
@@ -258,11 +250,7 @@ export default function ProductDetailPage() {
             </div>
 
             {/* Features */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
-              <div className="flex items-center gap-2 text-sm">
-                <Truck className="h-4 w-4 text-primary" />
-                <span>Envío gratis</span>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
               <div className="flex items-center gap-2 text-sm">
                 <Shield className="h-4 w-4 text-primary" />
                 <span>Garantía UCB</span>
