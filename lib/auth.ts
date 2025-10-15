@@ -143,6 +143,20 @@ class AuthService {
     });
   }
 
+
+  // Lista de carreras desde el backend (usa /api/careers)
+  async getCareersPublic(): Promise<string[]> {
+    try {
+      // acepta dos formatos: { ok, careers } o string[]
+      const res = await apiFetch<any>("/api/careers/public", { method: "GET" });
+      if (Array.isArray(res)) return res as string[];
+      if (Array.isArray(res?.careers)) return res.careers as string[];
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
   // Lista de carreras desde el backend (usa /api/careers)
   async getCareers(): Promise<string[]> {
     try {
@@ -247,6 +261,7 @@ class AuthService {
     this.currentUser = null;
     if (typeof window !== "undefined") {
       localStorage.removeItem("authUser");
+      localStorage.removeItem("ucb_cart_v1");
     }
   }
 

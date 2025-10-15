@@ -13,20 +13,52 @@ import { useCart } from "@/contexts/cart-context"
 export function Header() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const { cartCount } = useCart()
+  const { cartCount, updateCartCount } = useCart()
+
+  useEffect(() => {
+    let mounted = true
+      ; (async () => {
+        try {
+          const u = await authService.getCurrentUser()
+          if (mounted) setUser(u)
+        } catch {
+          if (mounted) setUser(null)
+        } finally {
+          // al montar el header, sincroniza el contador por si cambió fuera
+          updateCartCount?.()
+        }
+      })()
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "authUser") {
+        try {
+          const parsed = e.newValue ? (JSON.parse(e.newValue) as AuthUser) : null
+          setUser(parsed)
+        } catch {
+          setUser(null)
+        }
+      }
+    }
+    window.addEventListener("storage", onStorage)
+
+    return () => {
+      mounted = false
+      window.removeEventListener("storage", onStorage)
+    }
+  }, [updateCartCount])
 
   useEffect(() => {
     let mounted = true
 
-    // Cargar usuario (respeta cookie HttpOnly; usa cache/localStorage si existe)
-    ;(async () => {
-      try {
-        const u = await authService.getCurrentUser()
-        if (mounted) setUser(u)
-      } catch {
-        if (mounted) setUser(null)
-      }
-    })()
+      // Cargar usuario (respeta cookie HttpOnly; usa cache/localStorage si existe)
+      ; (async () => {
+        try {
+          const u = await authService.getCurrentUser()
+          if (mounted) setUser(u)
+        } catch {
+          if (mounted) setUser(null)
+        }
+      })()
 
     // Sincroniza cambios de sesión entre pestañas
     const onStorage = (e: StorageEvent) => {
@@ -48,6 +80,7 @@ export function Header() {
   }, [])
 
   const isAdmin = !!(user?.is_admin || user?.role === "admin")
+  const firstName = user?.name ? user.name.split(" ")[0] : ""
 
   const handleLogout = async () => {
     await authService.logout()
@@ -93,7 +126,21 @@ export function Header() {
           {/* User Actions */}
           <div className="flex items-center space-x-2">
             <ThemeToggle />
-
+            {/* Cart */}
+            <Link href="/cart">
+              <Button variant="ghost" size="sm" className="relative">
+                <ShoppingCart className="h-5 w-5" />
+                {cartCount > 0 && (
+                  <Badge
+                    variant="destructive"
+                    className="absolute -top-2 -right-2 h-5 min-w-[1.25rem] rounded-full p-0 px-1 flex items-center justify-center text-[10px] leading-none"
+                    title={`${cartCount} en carrito`}
+                  >
+                    {cartCount > 10 ? "10+" : cartCount}
+                  </Badge>
+                )}
+              </Button>
+            </Link>
             {user ? (
               <>
                 <Link href="/orders">
@@ -103,26 +150,10 @@ export function Header() {
                   </Button>
                 </Link>
 
-                {/* Cart */}
-                <Link href="/cart">
-                  <Button variant="ghost" size="sm" className="relative">
-                    <ShoppingCart className="h-5 w-5" />
-                    {cartCount > 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
-                      >
-                        {cartCount}
-                      </Badge>
-                    )}
-                  </Button>
-                </Link>
-
                 {/* User Menu */}
-                <div className="hidden md:flex items-center space-x-2">
+                <div className="hidden md:flex items-center space-x-6">
                   <div className="text-right">
-                    <p className="text-sm font-medium">{user.name}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{isAdmin ? "admin" : user.role}</p>
+                    <p className="text-sm font-medium">{firstName}</p>
                   </div>
                   <Button variant="ghost" size="sm" onClick={handleLogout}>
                     <LogOut className="h-4 w-4" />

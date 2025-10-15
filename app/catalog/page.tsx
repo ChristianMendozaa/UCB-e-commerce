@@ -1,6 +1,7 @@
+// app/catalog/page.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Header } from "@/components/header"
 import { ProductCard } from "@/components/product-card"
 import { Button } from "@/components/ui/button"
@@ -9,8 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Search, Filter, Grid, List } from "lucide-react"
-import type { Product } from "@/lib/database"
-import { db } from "@/lib/database"
+
+// ⬇️ usa los tipos reales y la API real
+import type { Product } from "@/lib/products"
+import { productsApi } from "@/lib/products"
 
 export default function CatalogPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -22,8 +25,15 @@ export default function CatalogPage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [isLoading, setIsLoading] = useState(true)
 
-  const careers = db.getCareers()
-  const categories = ["Tecnología", "Libros", "Electrónica", "Material Educativo", "Componentes"]
+  // Derivar filtros desde datos reales
+  const careers = useMemo(
+    () => Array.from(new Set(products.map(p => p.career))).sort(),
+    [products]
+  )
+  const categories = useMemo(
+    () => Array.from(new Set(products.map(p => p.category))).sort(),
+    [products]
+  )
 
   useEffect(() => {
     loadProducts()
@@ -36,8 +46,9 @@ export default function CatalogPage() {
   const loadProducts = async () => {
     setIsLoading(true)
     try {
-      const allProducts = await db.getProducts()
-      setProducts(allProducts)
+      // Público → GET /api/products/public (via rewrites)
+      const page = await productsApi.listPublicProducts({ limit: 100 })
+      setProducts(page.items)
     } catch (error) {
       console.error("Error loading products:", error)
     } finally {
@@ -48,38 +59,32 @@ export default function CatalogPage() {
   const filterAndSortProducts = () => {
     let filtered = [...products]
 
-    // Filtrar por búsqueda
+    // Búsqueda
     if (searchTerm) {
+      const q = searchTerm.toLowerCase()
       filtered = filtered.filter(
-        (product) =>
-          product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          product.description.toLowerCase().includes(searchTerm.toLowerCase()),
+        (p) => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
       )
     }
 
-    // Filtrar por carrera
+    // Carrera
     if (selectedCareer !== "all") {
-      filtered = filtered.filter((product) => product.career === selectedCareer)
+      filtered = filtered.filter((p) => p.career === selectedCareer)
     }
 
-    // Filtrar por categoría
+    // Categoría
     if (selectedCategory !== "all") {
-      filtered = filtered.filter((product) => product.category === selectedCategory)
+      filtered = filtered.filter((p) => p.category === selectedCategory)
     }
 
-    // Ordenar
+    // Orden
     filtered.sort((a, b) => {
       switch (sortBy) {
-        case "name":
-          return a.name.localeCompare(b.name)
-        case "price-low":
-          return a.price - b.price
-        case "price-high":
-          return b.price - a.price
-        case "stock":
-          return b.stock - a.stock
-        default:
-          return 0
+        case "name": return a.name.localeCompare(b.name)
+        case "price-low": return a.price - b.price
+        case "price-high": return b.price - a.price
+        case "stock": return b.stock - a.stock
+        default: return 0
       }
     })
 
@@ -93,7 +98,11 @@ export default function CatalogPage() {
     setSortBy("name")
   }
 
-  const activeFiltersCount = [searchTerm, selectedCareer !== "all", selectedCategory !== "all"].filter(Boolean).length
+  const activeFiltersCount = [
+    searchTerm,
+    selectedCareer !== "all",
+    selectedCategory !== "all",
+  ].filter(Boolean).length
 
   return (
     <div className="min-h-screen bg-background">
@@ -241,7 +250,9 @@ export default function CatalogPage() {
         ) : (
           <div
             className={
-              viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" : "space-y-4"
+              viewMode === "grid"
+                ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+                : "space-y-4"
             }
           >
             {filteredProducts.map((product) => (

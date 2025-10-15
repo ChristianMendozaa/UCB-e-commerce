@@ -1,68 +1,66 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { Header } from "@/components/header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { BookOpen, Laptop, Wrench, ArrowRight } from "lucide-react"
-import type { Product } from "@/lib/database"
-import { db } from "@/lib/database"
+import { ArrowRight, BookOpen, Laptop, Wrench } from "lucide-react"
+
+import type { Product } from "@/lib/products"
+import { productsApi } from "@/lib/products"
+import { authService } from "@/lib/auth"
 
 export default function CareersPage() {
+  const [careers, setCareers] = useState<string[]>([])
   const [productsByCareer, setProductsByCareer] = useState<Record<string, Product[]>>({})
   const [isLoading, setIsLoading] = useState(true)
 
-  const careerInfo = [
-    {
-      name: "Ingeniería de Sistemas",
-      icon: Laptop,
-      description: "Tecnología, programación y desarrollo de software",
-      color: "bg-blue-500",
-      gradient: "from-blue-500 to-blue-600",
-    },
-    {
-      name: "Psicopedagogía",
-      icon: BookOpen,
-      description: "Educación y desarrollo humano",
-      color: "bg-green-500",
-      gradient: "from-green-500 to-green-600",
-    },
-    {
-      name: "Mecatrónica",
-      icon: Wrench,
-      description: "Robótica y automatización industrial",
-      color: "bg-purple-500",
-      gradient: "from-purple-500 to-purple-600",
-    },
-  ]
-
-  useEffect(() => {
-    loadProductsByCareer()
+  const iconByCareer = useMemo(() => {
+    return new Map<string, React.ComponentType<any>>([
+      ["Ingeniería de Sistemas", Laptop],
+      ["Psicopedagogía", BookOpen],
+      ["Mecatrónica", Wrench],
+    ])
   }, [])
 
-  const loadProductsByCareer = async () => {
-    setIsLoading(true)
-    try {
-      const allProducts = await db.getProducts()
-      const grouped = allProducts.reduce(
-        (acc, product) => {
-          if (!acc[product.career]) {
-            acc[product.career] = []
-          }
-          acc[product.career].push(product)
+  useEffect(() => {
+    ;(async () => {
+      setIsLoading(true)
+      try {
+        const apiCareers = await authService.getCareersPublic()
+        const normalizedCareers: string[] = Array.isArray(apiCareers)
+          ? apiCareers
+              .map((c: any) =>
+                typeof c === "string"
+                  ? c
+                  : (c?.name ?? c?.title ?? c?.code ?? c?.id ?? "").toString(),
+              )
+              .filter(Boolean)
+          : []
+
+        setCareers(normalizedCareers)
+
+        const page = await productsApi.listPublicProducts({ limit: 200 })
+        const grouped = page.items.reduce((acc, p) => {
+          const key = p.career || "Otros"
+          if (!acc[key]) acc[key] = []
+          acc[key].push(p)
           return acc
-        },
-        {} as Record<string, Product[]>,
-      )
-      setProductsByCareer(grouped)
-    } catch (error) {
-      console.error("Error loading products:", error)
-    } finally {
-      setIsLoading(false)
-    }
-  }
+        }, {} as Record<string, Product[]>)
+
+        setProductsByCareer(grouped)
+      } catch (e) {
+        console.error("Error cargando carreras/productos", e)
+        setCareers([])
+        setProductsByCareer({})
+      } finally {
+        setIsLoading(false)
+      }
+    })()
+  }, [])
 
   return (
     <div className="min-h-screen bg-background">
@@ -77,31 +75,31 @@ export default function CareersPage() {
           </p>
         </div>
 
-        {/* Careers */}
+        {/* Careers dinámicas desde backend */}
         <div className="space-y-12">
-          {careerInfo.map((career, index) => {
-            const IconComponent = career.icon
-            const products = productsByCareer[career.name] || []
+          {careers.map((careerName) => {
+            const IconComponent = iconByCareer.get(careerName) ?? Laptop
+            const products = productsByCareer[careerName] || []
 
             return (
-              <div key={index} className="space-y-6">
+              <div key={careerName} className="space-y-6">
                 {/* Career Header */}
                 <div className="relative overflow-hidden rounded-2xl">
-                  <div className={`bg-gradient-to-r ${career.gradient} p-8 text-white`}>
+                  <div className={`bg-gradient-to-r from-primary to-primary/80 p-8 text-white`}>
                     <div className="flex items-center space-x-4 mb-4">
                       <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
                         <IconComponent className="h-8 w-8" />
                       </div>
                       <div>
-                        <h2 className="text-2xl md:text-3xl font-bold">{career.name}</h2>
-                        <p className="text-white/90">{career.description}</p>
+                        <h2 className="text-2xl md:text-3xl font-bold">{careerName}</h2>
+                        <p className="text-white/90">Recursos y materiales para {careerName}</p>
                       </div>
                     </div>
                     <div className="flex items-center justify-between">
                       <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
-                        {products.length} productos disponibles
+                        {isLoading ? "Cargando..." : `${products.length} productos disponibles`}
                       </Badge>
-                      <Link href={`/careers/${encodeURIComponent(career.name)}`}>
+                      <Link href={`/careers/${encodeURIComponent(careerName)}`}>
                         <Button
                           variant="secondary"
                           className="bg-white/20 hover:bg-white/30 text-white border-white/30"
@@ -138,10 +136,12 @@ export default function CareersPage() {
                       <Card key={product.id} className="hover:shadow-lg transition-shadow">
                         <CardHeader className="p-0">
                           <div className="relative h-48 overflow-hidden rounded-t-lg">
-                            <img
+                            <Image
                               src={product.image || "/placeholder.svg"}
                               alt={product.name}
-                              className="w-full h-full object-cover"
+                              fill
+                              className="object-cover"
+                              sizes="(max-width: 1024px) 100vw, 33vw"
                             />
                             <div className="absolute top-2 right-2">
                               <Badge variant="secondary" className="bg-background/80 backdrop-blur">
@@ -151,13 +151,31 @@ export default function CareersPage() {
                           </div>
                         </CardHeader>
                         <CardContent className="p-4">
-                          <CardTitle className="text-lg mb-2 line-clamp-2">{product.name}</CardTitle>
-                          <CardDescription className="text-sm mb-3 line-clamp-2">{product.description}</CardDescription>
+                          {/* Título clickeable */}
+                          <Link href={`/products/${product.id}`}>
+                            <CardTitle className="text-lg mb-2 line-clamp-2 hover:text-primary transition-colors">
+                              {product.name}
+                            </CardTitle>
+                          </Link>
+
+                          <CardDescription className="text-sm mb-3 line-clamp-2">
+                            {product.description}
+                          </CardDescription>
+
                           <div className="flex items-center justify-between">
                             <p className="text-xl font-bold text-primary">Bs. {product.price}</p>
                             <Badge variant="outline" className="text-xs">
                               Stock: {product.stock}
                             </Badge>
+                          </div>
+
+                          {/* ⬇️ Botón para ir a la página del producto */}
+                          <div className="mt-4">
+                            <Link href={`/products/${product.id}`}>
+                              <Button className="w-full" size="sm">
+                                Ver detalle
+                              </Button>
+                            </Link>
                           </div>
                         </CardContent>
                       </Card>
@@ -167,9 +185,9 @@ export default function CareersPage() {
 
                 {products.length > 3 && (
                   <div className="text-center">
-                    <Link href={`/careers/${encodeURIComponent(career.name)}`}>
+                    <Link href={`/careers/${encodeURIComponent(careerName)}`}>
                       <Button variant="outline">
-                        Ver todos los productos de {career.name}
+                        Ver todos los productos de {careerName}
                         <ArrowRight className="ml-2 h-4 w-4" />
                       </Button>
                     </Link>

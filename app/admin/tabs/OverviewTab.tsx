@@ -4,7 +4,7 @@ import { FC } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Package, ShoppingCart, Users, TrendingUp, Clock } from "lucide-react"
-import type { Order } from "@/lib/database"
+import type { Order } from "@/lib/orders"
 import type { Product } from "@/lib/products"
 
 export type DashboardStats = {

@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { ProductFormState } from "@/lib/products"
+import { Loader2 } from "lucide-react"
 
 type Props = {
   open: boolean
@@ -19,10 +20,11 @@ type Props = {
   onSubmit: () => void
   /** si existe, la carrera queda fija */
   lockCareer?: string | null
+  saving?: boolean
 }
 
 const ProductEditModal: FC<Props> = ({
-  open, onOpenChange, form, setForm, careers, categories, onSubmit, lockCareer
+  open, onOpenChange, form, setForm, careers, categories, onSubmit, lockCareer, saving
 }) => {
   const onFile = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null
@@ -94,8 +96,13 @@ const ProductEditModal: FC<Props> = ({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={onSubmit}>Guardar Cambios</Button>
+          <Button variant="outline" onClick={() => !saving && onOpenChange(false)} disabled={!!saving}>
+            Cancelar
+          </Button>
+          <Button onClick={onSubmit} disabled={!!saving}>
+            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Guardar Cambios
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

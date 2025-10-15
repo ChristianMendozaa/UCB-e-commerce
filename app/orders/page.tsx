@@ -1,3 +1,4 @@
+// app/orders/page.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -7,8 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Package, Clock, CheckCircle, Truck, Calendar } from "lucide-react"
-import type { Order, Product } from "@/lib/database"
-import { db } from "@/lib/database"
+
+import type { Order } from "@/lib/orders"
+import { ordersApi } from "@/lib/orders"
+import type { Product } from "@/lib/products"
+import { productsApi } from "@/lib/products"
 import { authService } from "@/lib/auth"
 
 interface OrderWithProducts extends Order {
@@ -25,39 +29,70 @@ export default function OrdersPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const user = authService.getCurrentUser()
-    if (!user) {
-      router.push("/login")
-      return
+    let mounted = true
+    ;(async () => {
+      const user = await authService.getCurrentUser()
+      if (!user) {
+        router.push("/login")
+        return
+      }
+      await loadOrders()
+      if (!mounted) return
+    })()
+    return () => {
+      mounted = false
     }
-    loadOrders()
   }, [router])
 
   const loadOrders = async () => {
-    const user = authService.getCurrentUser()
-    if (!user) return
-
     setIsLoading(true)
     try {
-      const userOrders = await db.getOrders(user.id)
-      const ordersWithProducts = await Promise.all(
-        userOrders.map(async (order) => {
-          const products = await Promise.all(
-            order.items.map(async (item) => {
-              const product = await db.getProduct(item.productId)
-              return {
-                product: product!,
-                quantity: item.quantity,
-                price: item.price,
-              }
-            }),
-          )
-          return { ...order, products: products.filter((p) => p.product) }
+      // 1) Traer pedidos del backend real
+      const userOrders = await ordersApi.listMyOrders({ limit: 50 })
+
+      if (userOrders.length === 0) {
+        setOrders([])
+        return
+      }
+
+      // 2) Juntar todos los productId únicos para reducir llamadas
+      const allIds = userOrders.flatMap((o) => o.items.map((it) => it.productId))
+      const uniqueIds = Array.from(new Set(allIds))
+
+      // 3) Cargar detalles de productos en paralelo
+      const productsArr = await Promise.all(
+        uniqueIds.map(async (id) => {
+          try {
+            const p = await productsApi.getProduct(id)
+            return [id, p] as const
+          } catch {
+            return [id, null] as const
+          }
         }),
       )
-      setOrders(ordersWithProducts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
-    } catch (error) {
-      console.error("Error loading orders:", error)
+      const productMap = new Map<string, Product | null>(productsArr)
+
+      // 4) Enriquecer cada pedido con sus productos
+      const withProducts: OrderWithProducts[] = userOrders.map((o) => ({
+        ...o,
+        products: o.items
+          .map((it) => {
+            const p = productMap.get(it.productId)
+            return p
+              ? { product: p, quantity: it.quantity, price: it.price }
+              : null
+          })
+          .filter(Boolean) as OrderWithProducts["products"],
+      }))
+
+      // 5) Ordenar desc por fecha de creación
+      withProducts.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )
+      setOrders(withProducts)
+    } catch (err) {
+      console.error("Error loading orders:", err)
+      setOrders([])
     } finally {
       setIsLoading(false)
     }
@@ -192,11 +227,12 @@ export default function OrdersPage() {
                     <div className="space-y-3">
                       {order.products.map((item, index) => (
                         <div key={index} className="flex items-center space-x-3 py-2">
-                          <div className="w-12 h-12 bg-muted rounded-lg flex items-center justify-center">
+                          <div className="w-12 h-12 bg-muted rounded-lg overflow-hidden">
+                            {/* Puedes cambiar por <Image/> si prefieres optimización */}
                             <img
                               src={item.product.image || "/placeholder.svg"}
                               alt={item.product.name}
-                              className="w-full h-full object-cover rounded-lg"
+                              className="w-full h-full object-cover"
                             />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -215,8 +251,8 @@ export default function OrdersPage() {
                     <div className="border-t pt-3 mt-3">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-muted-foreground">
-                          {order.products.reduce((sum, item) => sum + item.quantity, 0)} producto
-                          {order.products.reduce((sum, item) => sum + item.quantity, 0) !== 1 ? "s" : ""}
+                          {order.products.reduce((sum, it) => sum + it.quantity, 0)} producto
+                          {order.products.reduce((sum, it) => sum + it.quantity, 0) !== 1 ? "s" : ""}
                         </span>
                         <span className="font-semibold">Total: Bs. {order.total.toFixed(2)}</span>
                       </div>

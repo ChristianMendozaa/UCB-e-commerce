@@ -1,17 +1,19 @@
+// components/product-card.tsx
 "use client"
 
 import { useState } from "react"
 import Image from "next/image"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ShoppingCart, Plus, Minus } from "lucide-react"
-import type { Product } from "@/lib/database"
-import { db } from "@/lib/database"
+
+import type { Product } from "@/lib/products"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { useCart } from "@/contexts/cart-context"
-import Link from "next/link"
+import { addToCart as addToLocalCart } from "@/lib/cart" // ⬅️ carrito en localStorage
 
 interface ProductCardProps {
   product: Product
@@ -37,17 +39,18 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
 
     setIsLoading(true)
     try {
-      await db.addToCart(user.id, product.id, quantity)
-      await updateCartCount()
+      // ⬇️ Guardamos en localStorage
+      addToLocalCart(product.id, quantity)
+      await updateCartCount?.()
       toast({
         title: "Producto agregado",
         description: `${product.name} agregado al carrito`,
       })
       onAddToCart?.()
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "No se pudo agregar el producto al carrito",
+        description: error?.message || "No se pudo agregar el producto al carrito",
         variant: "destructive",
       })
     } finally {
@@ -56,15 +59,11 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
   }
 
   const incrementQuantity = () => {
-    if (quantity < product.stock) {
-      setQuantity(quantity + 1)
-    }
+    if (quantity < product.stock) setQuantity(quantity + 1)
   }
 
   const decrementQuantity = () => {
-    if (quantity > 1) {
-      setQuantity(quantity - 1)
-    }
+    if (quantity > 1) setQuantity(quantity - 1)
   }
 
   return (
@@ -98,6 +97,7 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
           </div>
         </Link>
       </CardHeader>
+
       <CardContent className="flex-1 flex flex-col p-4">
         <div className="flex-1">
           <Link href={`/products/${product.id}`}>
@@ -106,9 +106,10 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
             </CardTitle>
           </Link>
           <CardDescription className="text-sm mb-3 line-clamp-3">{product.description}</CardDescription>
+
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-2xl font-bold text-primary">Bs. {product.price}</p>
+              <p className="text-2xl font-bold text-primary">Bs. {Number(product.price).toFixed(2)}</p>
               <Badge variant="outline" className="text-xs">
                 {product.category}
               </Badge>
@@ -122,11 +123,16 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
         {product.stock > 0 && (
           <div className="space-y-3">
             <div className="flex items-center justify-center space-x-2">
-              <Button variant="outline" size="sm" onClick={decrementQuantity} disabled={quantity <= 1}>
+              <Button variant="outline" size="sm" onClick={decrementQuantity} disabled={quantity <= 1 || isLoading}>
                 <Minus className="h-4 w-4" />
               </Button>
               <span className="w-12 text-center font-medium">{quantity}</span>
-              <Button variant="outline" size="sm" onClick={incrementQuantity} disabled={quantity >= product.stock}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={incrementQuantity}
+                disabled={quantity >= product.stock || isLoading}
+              >
                 <Plus className="h-4 w-4" />
               </Button>
             </div>

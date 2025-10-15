@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Header } from "@/components/header"
 import { AdminGuard } from "@/components/admin-guard"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import ProductsTab from "./tabs/ProductsTab"
@@ -22,14 +22,16 @@ import {
   Clock,
   Truck,
 } from "lucide-react"
-import type { Order, User } from "@/lib/database"
-import { db } from "@/lib/database"
+import type { Order } from "@/lib/orders"
+import type { User } from "@/lib/database"
+import { ordersApi } from "@/lib/orders"
 import { useToast } from "@/hooks/use-toast"
 import { authService } from "@/lib/auth"
 import CareerPickerModal from "./modals/users/CareerPickerModal";
 import type { Product, ProductFormState } from "@/lib/products"
 import { productsApi } from "@/lib/products"
 import { useAuth } from "@/lib/auth";
+import { Loader2 } from "lucide-react"
 
 type CareerAction = { mode: "make" | "remove"; userId: string; adminCareers?: string[] } | null;
 function mapApiUserToUI(u: {
@@ -138,9 +140,13 @@ export default function AdminDashboard() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
 
+  const [isCreating, setIsCreating] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
   const { toast } = useToast()
 
-  const categories = ["Tecnología", "Libros", "Electrónica", "Material Educativo", "Componentes"]
+  const categories = ["Tecnología", "Libros", "Electrónica", "Material Educativo", "Componentes", "Ropa", "Otros"]
 
   useEffect(() => {
     loadDashboardData()
@@ -182,13 +188,14 @@ export default function AdminDashboard() {
   const loadDashboardData = async () => {
     setIsLoading(true)
     try {
-      await addSampleOrders()
+      // Productos desde backend real (como ya tienes)
+      const productsPage = await productsApi.listProducts() // ahora devuelve { items, next_cursor }
+      const productsData = productsPage.items
 
-      // 🔁 Productos desde backend real
-      const productsData = await productsApi.listProducts()
+      // Pedidos desde backend real
+      const ordersData = await ordersApi.listAdminOrders({ limit: 100 })
 
-      // 🔁 Pedidos (mock) y usuarios (auth backend como ya tenías)
-      const [ordersData] = await Promise.all([db.getOrders()])
+      // Usuarios desde backend de auth (como ya tienes)
       const apiUsers = await authService.listUsers()
       const usersData = apiUsers.map(mapApiUserToUI)
 
@@ -196,8 +203,7 @@ export default function AdminDashboard() {
       setOrders(ordersData)
       setUsers(usersData)
 
-      // (stats igual que antes)
-      const totalRevenue = ordersData.reduce((sum, order) => sum + order.total, 0)
+      const totalRevenue = ordersData.reduce((sum, o) => sum + o.total, 0)
       const pendingOrders = ordersData.filter((o) => o.status === "pending").length
       const lowStock = productsData.filter((p) => p.stock <= 5)
 
@@ -209,50 +215,15 @@ export default function AdminDashboard() {
         pendingOrders,
         lowStockProducts: lowStock.length,
       })
-      setRecentOrders(ordersData.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 5))
+      setRecentOrders(
+        [...ordersData].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 5)
+      )
       setLowStockProducts(lowStock.slice(0, 5))
     } catch (error) {
       console.error("Error loading dashboard data:", error)
       toast({ title: "Error", description: "No se pudieron cargar los datos del panel", variant: "destructive" })
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  const addSampleOrders = async () => {
-    const existingOrders = await db.getOrders()
-    if (existingOrders.length === 0) {
-      // Create sample orders
-      const sampleOrders = [
-        {
-          userId: "2",
-          items: [
-            { productId: "1", quantity: 1, price: 4500 },
-            { productId: "2", quantity: 2, price: 280 },
-          ],
-          total: 5060,
-          status: "pending" as const,
-        },
-        {
-          userId: "2",
-          items: [{ productId: "3", quantity: 1, price: 350 }],
-          total: 350,
-          status: "confirmed" as const,
-        },
-        {
-          userId: "1",
-          items: [
-            { productId: "4", quantity: 1, price: 320 },
-            { productId: "5", quantity: 1, price: 850 },
-          ],
-          total: 1170,
-          status: "shipped" as const,
-        },
-      ]
-
-      for (const order of sampleOrders) {
-        await db.createOrder(order)
-      }
     }
   }
 
@@ -315,40 +286,24 @@ export default function AdminDashboard() {
     setFilteredUsers(filtered)
   }
 
-  const handleViewProduct = (product: Product) => {
-    setSelectedProduct(product)
-    setIsProductModalOpen(true)
-  }
-
-  const handleEditProduct = (product: Product) => {
-    setSelectedProduct(product)
-    setProductForm({
-      name: product.name,
-      description: product.description,
-      price: product.price.toString(),
-      category: product.category,
-      career: product.career,
-      stock: product.stock.toString(),
-      image: product.image,
-      imageFile: null,
-    })
-    setIsEditModalOpen(true)
-  }
-
   const handleDeleteProduct = async (product: Product) => {
+    setDeletingId(product.id)
     try {
       await productsApi.deleteProduct(product.id)
-      setProducts(products.filter(p => p.id !== product.id))
+      setProducts(prev => prev.filter(p => p.id !== product.id))
       setProductToDelete(null)
       toast({ title: "Producto eliminado", description: "El producto ha sido eliminado exitosamente" })
     } catch (error) {
       toast({ title: "Error", description: "No se pudo eliminar el producto", variant: "destructive" })
+    } finally {
+      setDeletingId(null)
     }
   }
 
   const handleAddProduct = async () => {
+    setIsCreating(true)
     try {
-      const newProduct = await productsApi.createProduct({
+      const newProduct = await productsApi.createProductForm({
         name: productForm.name,
         description: productForm.description,
         price: Number(productForm.price),
@@ -356,42 +311,41 @@ export default function AdminDashboard() {
         career: productForm.career,
         stock: Number(productForm.stock),
         imageFile: productForm.imageFile || null,
+        convert_webp: true,
       })
-      setProducts([...products, newProduct])
+      setProducts(prev => [...prev, newProduct])
       setIsAddModalOpen(false)
-      setProductForm({
-        name: "", description: "", price: "", category: "", career: "", stock: "",
-        image: "", imageFile: null,
-      })
+      setProductForm({ name: "", description: "", price: "", category: "", career: "", stock: "", image: "", imageFile: null })
       toast({ title: "Producto creado", description: "El producto ha sido creado exitosamente" })
     } catch (error) {
       toast({ title: "Error", description: "No se pudo crear el producto", variant: "destructive" })
+    } finally {
+      setIsCreating(false)
     }
   }
 
   const handleUpdateProduct = async () => {
     if (!selectedProduct) return
+    setIsUpdating(true)
     try {
-      const updated = await productsApi.updateProduct(selectedProduct.id, {
+      const updated = await productsApi.updateProductForm(selectedProduct.id, {
         name: productForm.name,
         description: productForm.description,
         price: Number(productForm.price),
         category: productForm.category,
         career: productForm.career,
         stock: Number(productForm.stock),
-        imageFile: productForm.imageFile || null, // si hay file, reemplaza
+        imageFile: productForm.imageFile || null,
+        convert_webp: true,
       })
-      setProducts(products.map(p => (p.id === selectedProduct.id ? updated : p)))
+      setProducts(p => p.map(x => x.id === selectedProduct.id ? updated : x))
       setIsEditModalOpen(false)
       toast({ title: "Producto actualizado", description: "El producto ha sido actualizado exitosamente" })
     } catch (error) {
       toast({ title: "Error", description: "No se pudo actualizar el producto", variant: "destructive" })
+    } finally {
+      setIsUpdating(false)
     }
-  }
-
-  const handleViewUser = (user: User) => {
-    setSelectedUser(user)
-    setIsUserModalOpen(true)
   }
 
   const toggleUserRole = async (userId: string, currentRole: string) => {
@@ -477,18 +431,11 @@ export default function AdminDashboard() {
 
   const updateOrderStatus = async (orderId: string, newStatus: Order["status"]) => {
     try {
-      await db.updateOrderStatus(orderId, newStatus)
-      setOrders(orders.map((order) => (order.id === orderId ? { ...order, status: newStatus } : order)))
-      toast({
-        title: "Estado actualizado",
-        description: "El estado del pedido ha sido actualizado",
-      })
+      const updated = await ordersApi.updateStatus(orderId, newStatus)
+      setOrders(prev => prev.map(o => o.id === orderId ? updated : o))
+      toast({ title: "Estado actualizado", description: "El estado del pedido ha sido actualizado" })
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "No se pudo actualizar el estado del pedido",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: (error as any)?.message || "No se pudo actualizar el estado", variant: "destructive" })
     }
   }
 
@@ -709,6 +656,7 @@ export default function AdminDashboard() {
           careers={realCareers}
           categories={categories}
           onSubmit={handleAddProduct}
+          saving={isCreating}
           lockCareer={lockedCareer}
         />
 
@@ -720,6 +668,7 @@ export default function AdminDashboard() {
           careers={realCareers}
           categories={categories}
           onSubmit={handleUpdateProduct}
+          saving={isUpdating}
           lockCareer={lockedCareerForEdit}
         />
 

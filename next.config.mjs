@@ -7,6 +7,7 @@ const nextConfig = {
   async rewrites() {
     const AUTH = process.env.NEXT_PUBLIC_AUTH_API_URL;
     const PRODUCTS = process.env.NEXT_PUBLIC_PRODUCTS_API_URL;
+    const ORDERS = process.env.NEXT_PUBLIC_ORDERS_API_URL;
     return [
       {
         source: "/api/auth/:path*",
@@ -26,9 +27,13 @@ const nextConfig = {
         destination: `${AUTH}/careers/:path*`,
       },
       {
-        source: "/api/products/:path*", 
+        source: "/api/products/:path*",
         destination: `${PRODUCTS}/api/products/:path*`
-      }
+      },
+      {
+        source: "/api/orders/:path*",
+        destination: `${ORDERS}/orders/:path*`
+      },
     ];
   },
 };

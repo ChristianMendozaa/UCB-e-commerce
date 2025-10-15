@@ -10,10 +10,28 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Header } from "@/components/header"
 import { ArrowLeft, ShoppingCart, Package, Star, Truck, Shield, RefreshCw } from "lucide-react"
-import { db, type Product } from "@/lib/database"
+import { addToCart as addToLocalCart, getCartCount } from "@/lib/cart" 
+import type { Product } from "@/lib/products"
+import { productsApi } from "@/lib/products"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { useCart } from "@/contexts/cart-context"
+
+// helper: agregar al carrito en backend real
+async function addToCart(productId: string, quantity: number) {
+  const res = await fetch("/api/orders/cart/items", {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ product_id: productId, quantity }),
+  })
+  if (!res.ok) throw new Error(await res.text().catch(() => ""))
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
+}
 
 export default function ProductDetailPage() {
   const params = useParams()
@@ -26,16 +44,19 @@ export default function ProductDetailPage() {
   const [isAddingToCart, setIsAddingToCart] = useState(false)
 
   useEffect(() => {
-    loadProduct()
-  }, [params.id])
+    const id = Array.isArray(params?.id) ? params.id[0] : (params?.id as string | undefined)
+    if (!id) return
+    loadProduct(id)
+  }, [params?.id])
 
-  const loadProduct = async () => {
+  const loadProduct = async (id: string) => {
     setIsLoading(true)
     try {
-      const productData = await db.getProduct(params.id as string)
+      const productData = await productsApi.getProduct(id)
       setProduct(productData)
     } catch (error) {
       console.error("Error loading product:", error)
+      setProduct(null)
     } finally {
       setIsLoading(false)
     }
@@ -52,24 +73,20 @@ export default function ProductDetailPage() {
       router.push("/login")
       return
     }
-
     if (!product) return
 
     setIsAddingToCart(true)
     try {
-      await db.addToCart(user.id, product.id, quantity)
-      await updateCartCount()
-      toast({
-        title: "Producto agregado",
-        description: `${product.name} agregado al carrito`,
-      })
-      // Optionally redirect to cart or stay on page
-      // router.push("/cart")
-    } catch (error) {
+      // ⬇️ localStorage
+      addToLocalCart(product.id, quantity)
+      // si tu useCart lee del backend, cámbialo a leer de localStorage o haz:
+      await updateCartCount?.() // si internamente ya usa getCartCount, perfecto
+      toast({ title: "Producto agregado", description: `${product.name} agregado al carrito` })
+    } catch (error: any) {
       console.error("Error adding to cart:", error)
       toast({
         title: "Error",
-        description: "No se pudo agregar el producto al carrito",
+        description: error?.message || "No se pudo agregar el producto al carrito",
         variant: "destructive",
       })
     } finally {
@@ -124,10 +141,7 @@ export default function ProductDetailPage() {
       <div className="container mx-auto px-4 py-8">
         {/* Breadcrumb */}
         <div className="mb-6">
-          <Link
-            href="/catalog"
-            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-          >
+          <Link href="/catalog" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Volver al catálogo
           </Link>
@@ -164,7 +178,7 @@ export default function ProductDetailPage() {
                 </div>
                 <span className="text-sm text-muted-foreground">(4.8) • 24 reseñas</span>
               </div>
-              <p className="text-3xl font-bold text-primary mb-4">Bs. {product.price.toFixed(2)}</p>
+              <p className="text-3xl font-bold text-primary mb-4">Bs. {Number(product.price).toFixed(2)}</p>
             </div>
 
             <Separator />

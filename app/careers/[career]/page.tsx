@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import { Header } from "@/components/header"
@@ -9,45 +9,84 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { ArrowLeft, BookOpen, Laptop, Wrench } from "lucide-react"
-import type { Product } from "@/lib/database"
-import { db } from "@/lib/database"
+
+import type { Product } from "@/lib/products"
+import { productsApi } from "@/lib/products"
+import { authService } from "@/lib/auth"
 
 export default function CareerProductsPage() {
   const params = useParams()
   const careerName = decodeURIComponent(params.career as string)
+
   const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
-  const careerIcons = {
+  // íconos/colores opcionales por nombre (fallbacks incluidos)
+  const careerIcons = useMemo(() => ({
     "Ingeniería de Sistemas": Laptop,
-    Psicopedagogía: BookOpen,
-    Mecatrónica: Wrench,
-  }
+    "Psicopedagogía": BookOpen,
+    "Mecatrónica": Wrench,
+  }), [])
 
-  const careerColors = {
+  const careerColors = useMemo(() => ({
     "Ingeniería de Sistemas": "from-blue-500 to-blue-600",
-    Psicopedagogía: "from-green-500 to-green-600",
-    Mecatrónica: "from-purple-500 to-purple-600",
-  }
+    "Psicopedagogía": "from-green-500 to-green-600",
+    "Mecatrónica": "from-purple-500 to-purple-600",
+  }), [])
+
+  const IconComponent = (careerIcons as any)[careerName] || BookOpen
+  const gradientColor = (careerColors as any)[careerName] || "from-gray-500 to-gray-600"
 
   useEffect(() => {
     loadProducts()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [careerName])
+
+  async function resolveCareerCode(nameOrCode: string): Promise<{ code: string; label: string }> {
+    // /api/careers puede devolver strings o objetos; normalizamos
+    const apiCareers = await authService.getCareersPublic()
+    const normalized = Array.isArray(apiCareers)
+      ? apiCareers.map((c: any) => {
+          const code = (typeof c === "string" ? c : (c?.code ?? c?.id ?? c?.name ?? c?.title ?? "")).toString()
+          const label = (typeof c === "string" ? c : (c?.name ?? c?.title ?? c?.code ?? "")).toString()
+          return { code, label }
+        }).filter(c => c.code || c.label)
+      : []
+
+    // match por nombre exacto o por code exacto
+    const found = normalized.find(c => c.label === nameOrCode || c.code === nameOrCode)
+    // si no hay match, intentamos algo flexible (case-insensitive)
+    const foundLoose = found || normalized.find(c =>
+      c.label?.toLowerCase() === nameOrCode.toLowerCase() ||
+      c.code?.toLowerCase() === nameOrCode.toLowerCase()
+    )
+
+    // fallback: usar tal cual lo que vino en la URL como code
+    return foundLoose || { code: nameOrCode, label: nameOrCode }
+  }
 
   const loadProducts = async () => {
     setIsLoading(true)
     try {
-      const careerProducts = await db.getProducts(careerName)
-      setProducts(careerProducts)
+      const { code } = await resolveCareerCode(careerName)
+
+      // Paginamos respetando limit<=200
+      let cursor: string | undefined = undefined
+      const acc: Product[] = []
+      do {
+        const page = await productsApi.listPublicProducts({ career: code, limit: 200, cursor })
+        acc.push(...page.items)
+        cursor = page.next_cursor ?? undefined
+      } while (cursor)
+
+      setProducts(acc)
     } catch (error) {
       console.error("Error loading products:", error)
+      setProducts([])
     } finally {
       setIsLoading(false)
     }
   }
-
-  const IconComponent = careerIcons[careerName as keyof typeof careerIcons] || BookOpen
-  const gradientColor = careerColors[careerName as keyof typeof careerColors] || "from-gray-500 to-gray-600"
 
   return (
     <div className="min-h-screen bg-background">
@@ -78,7 +117,7 @@ export default function CareerProductsPage() {
               </div>
             </div>
             <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
-              {products.length} productos disponibles
+              {isLoading ? "Cargando..." : `${products.length} productos disponibles`}
             </Badge>
           </div>
         </div>
