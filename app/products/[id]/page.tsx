@@ -250,14 +250,10 @@ export default function ProductDetailPage() {
             </div>
 
             {/* Features */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+            <div className="grid grid-cols-1">
               <div className="flex items-center gap-2 text-sm">
                 <Shield className="h-4 w-4 text-primary" />
                 <span>Garantía UCB</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <RefreshCw className="h-4 w-4 text-primary" />
-                <span>Devoluciones</span>
               </div>
             </div>
           </div>
