@@ -15,35 +15,44 @@ export const HEAD = handler;
 export const OPTIONS = handler;
 
 async function handler(req: NextRequest, ctx: { params: { path?: string[] } }) {
-  const segments = ctx.params?.path ?? [];
-  const suffix = segments.length ? `/${segments.join("/")}` : "";
-  const target = new URL(`${AUTH}/careers${suffix}`);
-  target.search = req.nextUrl.search;
+    const segments = ctx.params?.path ?? [];
+    const suffix = segments.length ? `/${segments.join("/")}` : "";
+    const target = new URL(`${AUTH}/careers${suffix}`);
+    target.search = req.nextUrl.search;
 
-  const headers = new Headers(req.headers);
-  headers.delete("host");
-  headers.set("cache-control", "no-store");
+    const headers = new Headers(req.headers);
+    headers.delete("host");
+    headers.set("cache-control", "no-store");
 
-  const body = ["GET","HEAD"].includes(req.method) ? undefined : await req.arrayBuffer();
+    const body = ["GET", "HEAD"].includes(req.method) ? undefined : await req.arrayBuffer();
 
-  const upstream = await fetch(target.toString(), {
-    method: req.method,
-    headers,
-    body,
-    redirect: "manual",
-  });
+    const upstream = await fetch(target.toString(), {
+        method: req.method,
+        headers,
+        body,
+        redirect: "manual",
+    });
 
-  const res = new NextResponse(upstream.body, {
-    status: upstream.status,
-    headers: upstream.headers,
-  });
+    // ---- prepara respuesta → browser
+    const resHeaders = new Headers(upstream.headers);
+    // elimina headers que causan decodificación doble o inconsistencias
+    resHeaders.delete("content-encoding");
+    resHeaders.delete("content-length");
+    resHeaders.delete("transfer-encoding");
+    resHeaders.delete("connection");
 
-  const setCookie = upstream.headers.get("set-cookie");
-  if (setCookie) {
-    res.headers.delete("set-cookie");
-    setCookie.split(/,(?=\s*\w+=)/g).forEach(c => res.headers.append("set-cookie", c));
-  }
+    const res = new NextResponse(upstream.body, {
+        status: upstream.status,
+        headers: resHeaders,
+    });
 
-  res.headers.set("cache-control", "no-store");
-  return res;
+    // Propaga múltiples Set-Cookie si vinieran
+    const setCookie = upstream.headers.get("set-cookie");
+    if (setCookie) {
+        res.headers.delete("set-cookie");
+        setCookie.split(/,(?=\s*\w+=)/g).forEach((c) => res.headers.append("set-cookie", c));
+    }
+
+    res.headers.set("cache-control", "no-store");
+    return res;
 }

@@ -38,18 +38,24 @@ async function handler(req: NextRequest, ctx: { params: { path?: string[] } }) {
     redirect: "manual",
   });
 
+  // ---- prepara respuesta → browser
   const resHeaders = new Headers(upstream.headers);
+  // elimina headers que causan decodificación doble o inconsistencias
+  resHeaders.delete("content-encoding");
+  resHeaders.delete("content-length");
+  resHeaders.delete("transfer-encoding");
+  resHeaders.delete("connection");
+
   const res = new NextResponse(upstream.body, {
     status: upstream.status,
     headers: resHeaders,
   });
 
-  // Propaga múltiples Set-Cookie si vienen del backend
+  // Propaga múltiples Set-Cookie si vinieran
   const setCookie = upstream.headers.get("set-cookie");
   if (setCookie) {
     res.headers.delete("set-cookie");
-    const cookies = setCookie.split(/,(?=\s*\w+=)/g);
-    cookies.forEach((c) => res.headers.append("set-cookie", c));
+    setCookie.split(/,(?=\s*\w+=)/g).forEach((c) => res.headers.append("set-cookie", c));
   }
 
   res.headers.set("cache-control", "no-store");
