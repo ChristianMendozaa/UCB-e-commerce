@@ -21,14 +21,14 @@ const nextConfig = {
         source: "/api/careers/:path*",
         destination: `${AUTH}/careers/:path*`,
       },
-      {
-        source: "/api/products/:path*",
-        destination: `${PRODUCTS}/api/products/:path*`
-      },
-      {
-        source: "/api/orders/:path*",
-        destination: `${ORDERS}/orders/:path*`
-      },
+      // {
+      //   source: "/api/products/:path*",
+      //   destination: `${PRODUCTS}/api/products/:path*`
+      // },
+      // {
+      //   source: "/api/orders/:path*",
+      //   destination: `${ORDERS}/orders/:path*`
+      // },
     ];
   },
   async headers() {
