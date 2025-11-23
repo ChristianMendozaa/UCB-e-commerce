@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next"
 import { Suspense } from "react"
 import { CartProvider } from "@/contexts/cart-context"
 import { Toaster } from "@/components/ui/toaster"
+import { ChatWidget } from "@/components/chat-widget"
 import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
 
@@ -63,6 +64,8 @@ export default function RootLayout({
           <CartProvider>
             <Suspense fallback={null}>{children}</Suspense>
             <Toaster />
+            {/* 💬 Chat flotante */}
+            <ChatWidget />
           </CartProvider>
         </ThemeProvider>
         <Analytics />

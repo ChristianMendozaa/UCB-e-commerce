@@ -1,11 +1,13 @@
 "use client"
 
-import { FC } from "react"
+import type { FC } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Package, ShoppingCart, Users, TrendingUp, Clock } from "lucide-react"
 import type { Order } from "@/lib/orders"
 import type { Product } from "@/lib/products"
+import { DashboardCharts } from "@/components/admin/dashboard-charts"
+import type { JSX } from "react/jsx-runtime"
 
 export type DashboardStats = {
   totalProducts: number
@@ -20,7 +22,6 @@ type Props = {
   stats: DashboardStats
   recentOrders: Order[]
   lowStockProducts: Product[]
-  // helpers de estado de pedido (provistos por el padre)
   getOrderStatusIcon: (s: Order["status"]) => JSX.Element
   getOrderStatusColor: (s: Order["status"]) => string
   getOrderStatusText: (s: Order["status"]) => string
@@ -55,10 +56,20 @@ const OverviewTab: FC<Props> = ({
         <StatCard icon={<Package className="h-5 w-5 text-primary" />} label="Productos" value={stats.totalProducts} />
         <StatCard icon={<ShoppingCart className="h-5 w-5 text-blue-500" />} label="Pedidos" value={stats.totalOrders} />
         <StatCard icon={<Users className="h-5 w-5 text-green-500" />} label="Usuarios" value={stats.totalUsers} />
-        <StatCard icon={<TrendingUp className="h-5 w-5 text-purple-500" />} label="Ingresos" value={`Bs. ${stats.totalRevenue.toFixed(0)}`} />
+        <StatCard
+          icon={<TrendingUp className="h-5 w-5 text-purple-500" />}
+          label="Ingresos"
+          value={`Bs. ${stats.totalRevenue.toFixed(0)}`}
+        />
         <StatCard icon={<Clock className="h-5 w-5 text-yellow-500" />} label="Pendientes" value={stats.pendingOrders} />
-        <StatCard icon={<Package className="h-5 w-5 text-red-500" />} label="Stock Bajo" value={stats.lowStockProducts} />
+        <StatCard
+          icon={<Package className="h-5 w-5 text-red-500" />}
+          label="Stock Bajo"
+          value={stats.lowStockProducts}
+        />
       </div>
+
+      <DashboardCharts stats={stats} orders={recentOrders} />
 
       {/* Columna doble: Pedidos recientes / Stock bajo */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -74,9 +85,7 @@ const OverviewTab: FC<Props> = ({
                 <div key={order.id} className="flex items-center justify-between p-3 border rounded-lg">
                   <div>
                     <p className="font-medium">Pedido #{order.id}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {new Date(order.createdAt).toLocaleDateString()}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{new Date(order.createdAt).toLocaleDateString()}</p>
                   </div>
                   <div className="flex items-center space-x-2">
                     <Badge className={`${getOrderStatusColor(order.status)} text-white`}>
@@ -90,9 +99,7 @@ const OverviewTab: FC<Props> = ({
                 </div>
               ))}
               {recentOrders.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No hay pedidos recientes.
-                </p>
+                <p className="text-sm text-muted-foreground text-center py-4">No hay pedidos recientes.</p>
               )}
             </div>
           </CardContent>
