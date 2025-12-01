@@ -23,6 +23,7 @@ type Props = {
   // NUEVO:
   busyUserId?: string | null
   busyMode?: "make" | "remove" | null
+  currentUserId?: string
 }
 
 const UsersTab: FC<Props> = ({
@@ -37,6 +38,7 @@ const UsersTab: FC<Props> = ({
   // 👇 ¡faltaban estos dos!
   busyUserId,
   busyMode,
+  currentUserId,
 }) => {
   return (
     <Card>
@@ -118,12 +120,32 @@ const UsersTab: FC<Props> = ({
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
                       <Badge
-                        variant={user.role === "admin" ? "default" : user.role === "teacher" ? "secondary" : "outline"}
+                        variant={
+                          user.platformAdmin
+                            ? "destructive" // Color distintivo para Platform Admin
+                            : user.role === "admin"
+                              ? "default"
+                              : user.role === "teacher"
+                                ? "secondary"
+                                : "outline"
+                        }
                       >
                         <span className="flex items-center gap-1">
-                          {user.role === "admin" ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
+                          {user.platformAdmin ? (
+                            <ShieldCheck className="h-3 w-3 text-white" />
+                          ) : user.role === "admin" ? (
+                            <ShieldCheck className="h-3 w-3" />
+                          ) : (
+                            <Shield className="h-3 w-3" />
+                          )}
                           <span>
-                            {user.role === "admin" ? "Administrador" : user.role === "teacher" ? "Profesor" : "Estudiante"}
+                            {user.platformAdmin
+                              ? "Platform Admin"
+                              : user.role === "admin"
+                                ? "Administrador"
+                                : user.role === "teacher"
+                                  ? "Profesor"
+                                  : "Estudiante"}
                           </span>
                         </span>
                       </Badge>
@@ -153,22 +175,31 @@ const UsersTab: FC<Props> = ({
                             <Eye className="mr-2 h-4 w-4" />
                             Ver perfil
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={busyUserId === user.id}
-                            onClick={() => onToggleRole(user.id, user.role)}
-                          >
-                            {user.role === "admin" ? (
-                              <>
-                                <UserX className="mr-2 h-4 w-4" />
-                                {busyUserId === user.id && busyMode === "remove" ? "Quitando..." : "Quitar admin"}
-                              </>
-                            ) : (
-                              <>
-                                <UserCheck className="mr-2 h-4 w-4" />
-                                {busyUserId === user.id && busyMode === "make" ? "Haciendo..." : "Hacer admin"}
-                              </>
-                            )}
-                          </DropdownMenuItem>
+
+                          {/* Ocultar opción si es el mismo usuario */}
+                          {user.id !== currentUserId && (
+                            <DropdownMenuItem
+                              disabled={busyUserId === user.id}
+                              onClick={() => onToggleRole(user.id, user.role)}
+                            >
+                              {user.platformAdmin ? (
+                                <>
+                                  <UserX className="mr-2 h-4 w-4" />
+                                  {busyUserId === user.id && busyMode === "remove" ? "Quitando..." : "Quitar Platform Admin"}
+                                </>
+                              ) : user.role === "admin" ? (
+                                <>
+                                  <UserX className="mr-2 h-4 w-4" />
+                                  {busyUserId === user.id && busyMode === "remove" ? "Quitando..." : "Quitar admin"}
+                                </>
+                              ) : (
+                                <>
+                                  <UserCheck className="mr-2 h-4 w-4" />
+                                  {busyUserId === user.id && busyMode === "make" ? "Haciendo..." : "Hacer admin"}
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -179,7 +210,7 @@ const UsersTab: FC<Props> = ({
           </div>
         )}
       </CardContent>
-    </Card>
+    </Card >
   )
 }
 

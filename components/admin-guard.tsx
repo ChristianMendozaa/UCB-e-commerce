@@ -39,8 +39,8 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const me: MeResp = await res.json();
-        const isAdmin = Boolean(me.is_admin || me.role === "admin" || me.profile?.role === "admin");
+        const me: MeResp & { platform_admin?: boolean } = await res.json();
+        const isAdmin = Boolean(me.is_admin || me.role === "admin" || me.profile?.role === "admin" || me.platform_admin);
 
         if (mounted) {
           setAllowed(isAdmin);

@@ -79,7 +79,7 @@ export function Header() {
     }
   }, [])
 
-  const isAdmin = !!(user?.is_admin || user?.role === "admin")
+  const isAdmin = !!(user?.is_admin || user?.role === "admin" || user?.platform_admin)
   const firstName = user?.name ? user.name.split(" ")[0] : ""
 
   const handleLogout = async () => {

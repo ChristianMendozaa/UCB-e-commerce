@@ -271,6 +271,37 @@ export default function AdminDashboard() {
   const filterUsers = () => {
     let filtered = [...users]
 
+    // 🔒 Filtrado por permisos de visión (Scope)
+    if (user && !user.platform_admin) {
+      // Soy Career Admin (o similar)
+      const myCareers = user.admin_careers || [];
+
+      filtered = filtered.filter(u => {
+        // 1. No ver Platform Admins
+        if (u.platformAdmin) return false;
+
+        // 2. Si es admin, solo ver si comparte carrera
+        if (u.role === "admin") {
+          // Si el target no tiene carreras (raro para admin), lo ocultamos o mostramos? 
+          // Mejor ocultar si no coincide.
+          const targetCareers = u.adminCareers || [];
+          const sharesCareer = targetCareers.some(c => myCareers.includes(c));
+          return sharesCareer;
+        }
+
+        // 3. Si es student (o teacher), ver todos o solo de mi carrera?
+        // El requerimiento dice: "usuarios de rol student y otros admins de la misma carrera"
+        // Asumiremos que students se ven todos o se filtran por carrera si la tienen.
+        // Por seguridad/coherencia, si el estudiante tiene carrera, debe coincidir.
+        if (u.career) {
+          return myCareers.includes(u.career);
+        }
+
+        // Si es estudiante sin carrera asignada, lo mostramos (para poder asignarle una)
+        return true;
+      });
+    }
+
     if (userSearchTerm) {
       filtered = filtered.filter(
         (user) =>
@@ -349,7 +380,11 @@ export default function AdminDashboard() {
   }
 
   const toggleUserRole = async (userId: string, currentRole: string) => {
-    if (currentRole !== "admin") {
+    const target = users.find((x) => x.id === userId);
+    const platformAdmin = (target as any)?.platformAdmin;
+
+    // Si NO es admin Y NO es platform admin -> Promover
+    if (currentRole !== "admin" && !platformAdmin) {
       // ➕ Hacer admin → abre modal y carga catálogo (el useEffect de arriba lo hace)
       setCareerAction({ mode: "make", userId });
       setCareerModalOpen(true);
@@ -357,8 +392,30 @@ export default function AdminDashboard() {
     }
 
     // 🔻 Quitar admin
-    const target = users.find((x) => x.id === userId);
+    // const target = users.find((x) => x.id === userId); // ya lo tenemos arriba
+    // const platformAdmin = (target as any).platformAdmin; // ya lo tenemos arriba
     const adminCareers: string[] = (target as any)?.adminCareers || [];
+
+    // Si es Platform Admin, quitar ese rol directamente (o preguntar)
+    if (platformAdmin) {
+      setBusyUserId(userId);
+      setBusyMode("remove");
+      try {
+        await authService.removePlatformAdmin(userId);
+        toast({ title: "Rol actualizado", description: "Se quitó el rol de Platform Admin" });
+
+        const apiUsers = await authService.listUsers();
+        const usersData = apiUsers.map(mapApiUserToUI);
+        setUsers(usersData);
+      } catch (e) {
+        console.error(e);
+        toast({ title: "Error", description: "No se pudo quitar el rol de Platform Admin", variant: "destructive" });
+      } finally {
+        setBusyUserId(null);
+        setBusyMode(null);
+      }
+      return;
+    }
 
     if (adminCareers.length === 0) {
       toast({ title: "Sin carreras", description: "Este usuario no administra ninguna carrera." });
@@ -401,9 +458,15 @@ export default function AdminDashboard() {
 
     try {
       if (careerAction.mode === "make") {
-        await authService.makeAdmin(careerAction.userId, career);
-        toast({ title: "Rol actualizado", description: `Usuario promovido a admin de ${career}` });
+        if (career === "__PLATFORM_ADMIN__") {
+          await authService.makePlatformAdmin(careerAction.userId);
+          toast({ title: "Rol actualizado", description: "Usuario promovido a Platform Admin" });
+        } else {
+          await authService.makeAdmin(careerAction.userId, career);
+          toast({ title: "Rol actualizado", description: `Usuario promovido a admin de ${career}` });
+        }
       } else {
+        // Remove mode (only for career admin via modal)
         await authService.removeAdmin(careerAction.userId, career);
         toast({ title: "Rol actualizado", description: `Se quitó admin en ${career}` });
       }
@@ -544,7 +607,11 @@ export default function AdminDashboard() {
           </div>
 
           {/* Main Content */}
-          <Tabs defaultValue="overview" className="space-y-6">
+          <Tabs defaultValue="overview" className="space-y-6" onValueChange={(val) => {
+            if (val === "overview") {
+              loadDashboardData()
+            }
+          }}>
             <div className="w-full overflow-x-auto">
               <TabsList className="grid w-full grid-cols-4 min-w-[400px]">
                 <TabsTrigger value="overview" className="text-xs sm:text-sm">
@@ -642,6 +709,7 @@ export default function AdminDashboard() {
                 // NUEVO:
                 busyUserId={busyUserId}
                 busyMode={busyMode}
+                currentUserId={user?.id}
               />
             </TabsContent>
 

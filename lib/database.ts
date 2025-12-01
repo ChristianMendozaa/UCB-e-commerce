@@ -5,6 +5,8 @@ export interface User {
   name: string
   role: "student" | "teacher" | "admin"
   career?: string
+  platformAdmin?: boolean
+  adminCareers?: string[]
   createdAt: Date
 }
 

@@ -143,6 +143,20 @@ class AuthService {
     });
   }
 
+  async makePlatformAdmin(targetUid: string): Promise<void> {
+    await apiFetch("/api/users/roles/make_platform_admin", {
+      method: "POST",
+      body: JSON.stringify({ uid: targetUid }),
+    });
+  }
+
+  async removePlatformAdmin(targetUid: string): Promise<void> {
+    await apiFetch("/api/users/roles/remove_platform_admin", {
+      method: "POST",
+      body: JSON.stringify({ uid: targetUid }),
+    });
+  }
+
 
   // Lista de carreras desde el backend (usa /api/careers)
   async getCareersPublic(): Promise<string[]> {

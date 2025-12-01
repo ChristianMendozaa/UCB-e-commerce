@@ -1,30 +1,75 @@
-# UCB e-commerce platform
+# UCB Commerce Frontend
 
-*Automatically synced with your [v0.app](https://v0.app) deployments*
+Interfaz de usuario moderna y responsiva para la plataforma de comercio electrónico de la UCB. Construida con Next.js, Tailwind CSS y Shadcn UI.
 
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/christians-projects-51c84a05/v0-ucb-e-commerce-platform)
-[![Built with v0](https://img.shields.io/badge/Built%20with-v0.app-black?style=for-the-badge)](https://v0.app/chat/projects/lo9xVoukrqF)
+## Descripción
 
-## Overview
+Este proyecto es el frontend de la aplicación UCB Commerce. Proporciona una experiencia de usuario fluida para estudiantes y administradores. Incluye funcionalidades para navegar el catálogo, realizar pedidos, gestionar el carrito de compras y un panel de administración completo para gestionar productos, usuarios y órdenes.
 
-This repository will stay in sync with your deployed chats on [v0.app](https://v0.app).
-Any changes you make to your deployed app will be automatically pushed to this repository from [v0.app](https://v0.app).
+## Tecnologías
 
-## Deployment
+- **Framework:** Next.js 14 (App Router)
+- **Lenguaje:** TypeScript
+- **Estilos:** Tailwind CSS
+- **Componentes UI:** Shadcn UI (basado en Radix UI)
+- **Iconos:** Lucide React
+- **Gestión de Estado:** React Context (Carrito) y Hooks personalizados.
 
-Your project is live at:
+## Funcionalidades
 
-**[https://vercel.com/christians-projects-51c84a05/v0-ucb-e-commerce-platform](https://vercel.com/christians-projects-51c84a05/v0-ucb-e-commerce-platform)**
+### Para Estudiantes (Público/Autenticado)
+- **Catálogo de Productos:** Visualización de productos con filtros por categoría y carrera.
+- **Carrito de Compras:** Gestión de items, cálculo de totales y checkout.
+- **Perfil de Usuario:** Visualización de historial de pedidos y estado.
+- **Autenticación:** Inicio de sesión con Google.
 
-## Build your app
+### Para Administradores (Panel Admin)
+- **Dashboard:** Resumen estadístico de ventas, usuarios y productos.
+- **Gestión de Productos:** CRUD completo de productos con soporte para imágenes.
+- **Gestión de Usuarios:**
+  - Listado de usuarios con filtros.
+  - Asignación y remoción de roles (Admin de Carrera, Platform Admin).
+  - Prevención de auto-democión.
+- **Gestión de Pedidos:** Visualización y actualización de estados de pedidos.
+- **Control de Acceso Granular:**
+  - **Platform Admin:** Acceso total.
+  - **Career Admin:** Acceso limitado a productos y usuarios de sus carreras asignadas.
 
-Continue building your app on:
+## Configuración y Ejecución
 
-**[https://v0.app/chat/projects/lo9xVoukrqF](https://v0.app/chat/projects/lo9xVoukrqF)**
+1.  **Instalar dependencias:**
+    ```bash
+    npm install
+    # o
+    pnpm install
+    ```
 
-## How It Works
+2.  **Configurar variables de entorno:**
+    Crear un archivo `.env.local` con las siguientes variables (ejemplo):
+    ```env
+    NEXT_PUBLIC_FIREBASE_API_KEY=...
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID=...
+    # URLs de los microservicios (para rewrites en next.config.mjs)
+    AUTH_SERVICE_URL=http://localhost:8001
+    ORDERS_SERVICE_URL=http://localhost:8002
+    PRODUCTS_SERVICE_URL=http://localhost:8003
+    ```
 
-1. Create and modify your project using [v0.app](https://v0.app)
-2. Deploy your chats from the v0 interface
-3. Changes are automatically pushed to this repository
-4. Vercel deploys the latest version from this repository
+3.  **Ejecutar en desarrollo:**
+    ```bash
+    npm run dev
+    ```
+    La aplicación estará disponible en `https://ucb-e-commerce.vercel.app`.
+
+## Estructura de Carpetas
+
+```
+app/
+├── admin/      # Rutas y componentes del panel de administración
+├── (shop)/     # Rutas públicas de la tienda (catálogo, carrito)
+├── api/        # Rutas API internas (si las hay)
+components/     # Componentes reutilizables (UI, Header, Guards)
+lib/            # Utilidades, clientes API y definiciones de tipos
+contexts/       # Contextos globales (CartContext)
+```
