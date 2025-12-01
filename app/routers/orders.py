@@ -121,15 +121,19 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
     @gcf.transactional
     def _tx_create(tx: gcf.Transaction):
         # 2) Operaciones atómicas dentro de la TX:
-        #    - volver a leer y descontar stock
+        #    Separamos lecturas de escrituras para evitar "ReadAfterWriteError"
+        snapshots = []
         for it in payload.items:
             p_ref = _safe_prod_ref(it.productId)
-            snap = p_ref.get(transaction=tx)  # ✅ SIEMPRE DocumentSnapshot
+            snap = p_ref.get(transaction=tx)
+            snapshots.append((snap, it, p_ref))
+        
+        # Una vez leídos todos, validamos y encolamos updates
+        for snap, it, p_ref in snapshots:
             if not snap.exists:
                 raise HTTPException(status_code=404, detail=f"Producto {it.productId} no existe.")
             current = int((snap.to_dict() or {}).get("stock", 0))
             if current < it.quantity:
-                # conflicto lógico si alguien compró antes
                 raise HTTPException(status_code=409, detail="Stock cambió; no disponible.")
             tx.update(p_ref, {"stock": current - it.quantity})
 
