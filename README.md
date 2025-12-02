@@ -1,5 +1,7 @@
 # UCB Commerce Frontend
 
+[**Live Demo**](https://ucb-e-commerce.vercel.app)
+
 A modern, responsive e-commerce interface built with Next.js 14, Tailwind CSS, and Shadcn UI.
 
 ## The Problem
@@ -35,7 +37,14 @@ Instead of a heavy component library, we used **Shadcn UI** (headless components
 - **Performance**: Zero runtime CSS overhead.
 
 ### Microservices Integration
-The frontend acts as an **API Gateway** pattern implementation for the client. It aggregates data from multiple services (Auth, Products, Orders) and presents a cohesive view to the user, handling authentication tokens and error states transparently.
+The frontend acts as an **API Gateway** pattern implementation for the client. It aggregates data from multiple services and presents a cohesive view to the user, handling authentication tokens and error states transparently.
+
+**Connected Services:**
+- [Products Service](https://github.com/ChristianMendozaa/products_service_UCB_commerce)
+- [Auth Service](https://github.com/ChristianMendozaa/auth_UCB_commerce)
+- [Chatbot Service](https://github.com/ChristianMendozaa/chatbot_servive_UCB_commerce)
+- [Images Service](https://github.com/ChristianMendozaa/images_services_UCB_commerce)
+- [Orders Service](https://github.com/ChristianMendozaa/orders_service_UCB_commerce)
 
 ## Features
 - **Role-Based Access Control (RBAC)**: Dynamic UI for Students, Career Admins, and Platform Admins.
