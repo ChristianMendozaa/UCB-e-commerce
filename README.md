@@ -1,75 +1,77 @@
 # UCB Commerce Frontend
 
-Interfaz de usuario moderna y responsiva para la plataforma de comercio electrónico de la UCB. Construida con Next.js, Tailwind CSS y Shadcn UI.
+A modern, responsive e-commerce interface built with Next.js 14, Tailwind CSS, and Shadcn UI.
 
-## Descripción
+## The Problem
+University e-commerce platforms often suffer from fragmented user experiences, where students and administrators are forced to use disparate, outdated systems. We needed a solution that could:
+1.  Provide a seamless, "Amazon-like" shopping experience for students.
+2.  Offer a powerful, granular administration panel for career directors and platform admins.
+3.  Unify these roles into a single, performant application without sacrificing security or speed.
 
-Este proyecto es el frontend de la aplicación UCB Commerce. Proporciona una experiencia de usuario fluida para estudiantes y administradores. Incluye funcionalidades para navegar el catálogo, realizar pedidos, gestionar el carrito de compras y un panel de administración completo para gestionar productos, usuarios y órdenes.
+## The Solution
+UCB Commerce Frontend is a unified web application that dynamically adapts its interface based on user roles. It leverages Server-Side Rendering (SSR) for performance and SEO, while using a microservices architecture to offload complex logic to specialized backend services.
 
-## Tecnologías
+## Architecture
+```mermaid
+graph TD
+    Client[User Browser] -->|HTTPS| Frontend[Next.js Frontend]
+    Frontend -->|REST API| Auth[Auth Service]
+    Frontend -->|REST API| Products[Products Service]
+    Frontend -->|REST API| Orders[Orders Service]
+    Frontend -->|REST API| Chatbot[Chatbot Service]
+    Frontend -->|REST API| Images[Images Service]
+    Chatbot -->|RAG| VectorDB[(Supabase Vector)]
+```
 
-- **Framework:** Next.js 14 (App Router)
-- **Lenguaje:** TypeScript
-- **Estilos:** Tailwind CSS
-- **Componentes UI:** Shadcn UI (basado en Radix UI)
-- **Iconos:** Lucide React
-- **Gestión de Estado:** React Context (Carrito) y Hooks personalizados.
+## Technical Decisions
 
-## Funcionalidades
+### Why Next.js 14 (App Router)?
+We chose Next.js for its **Server Components** architecture. This allows us to render critical content (like product details) on the server, improving First Contentful Paint (FCP) and SEO. It also simplifies data fetching by allowing us to call our microservices directly from the server, reducing client-side waterfalls.
 
-### Para Estudiantes (Público/Autenticado)
-- **Catálogo de Productos:** Visualización de productos con filtros por categoría y carrera.
-- **Carrito de Compras:** Gestión de items, cálculo de totales y checkout.
-- **Perfil de Usuario:** Visualización de historial de pedidos y estado.
-- **Autenticación:** Inicio de sesión con Google.
+### Why Shadcn UI + Tailwind CSS?
+Instead of a heavy component library, we used **Shadcn UI** (headless components based on Radix UI) combined with **Tailwind CSS**. This gives us:
+- **Accessibility**: Built-in keyboard navigation and screen reader support.
+- **Customization**: Full control over the design system without fighting framework overrides.
+- **Performance**: Zero runtime CSS overhead.
 
-### Para Administradores (Panel Admin)
-- **Dashboard:** Resumen estadístico de ventas, usuarios y productos.
-- **Gestión de Productos:** CRUD completo de productos con soporte para imágenes.
-- **Gestión de Usuarios:**
-  - Listado de usuarios con filtros.
-  - Asignación y remoción de roles (Admin de Carrera, Platform Admin).
-  - Prevención de auto-democión.
-- **Gestión de Pedidos:** Visualización y actualización de estados de pedidos.
-- **Control de Acceso Granular:**
-  - **Platform Admin:** Acceso total.
-  - **Career Admin:** Acceso limitado a productos y usuarios de sus carreras asignadas.
+### Microservices Integration
+The frontend acts as an **API Gateway** pattern implementation for the client. It aggregates data from multiple services (Auth, Products, Orders) and presents a cohesive view to the user, handling authentication tokens and error states transparently.
 
-## Configuración y Ejecución
+## Features
+- **Role-Based Access Control (RBAC)**: Dynamic UI for Students, Career Admins, and Platform Admins.
+- **Real-time Cart**: Persistent shopping cart state.
+- **AI Chatbot Integration**: Floating assistant for instant support.
+- **Optimized Images**: Automatic format selection and lazy loading.
 
-1.  **Instalar dependencias:**
+## Tech Stack
+- **Framework**: Next.js 14
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **State Management**: React Context + Hooks
+- **Icons**: Lucide React
+
+## Setup & Run
+
+1.  **Install dependencies:**
     ```bash
     npm install
-    # o
+    # or
     pnpm install
     ```
 
-2.  **Configurar variables de entorno:**
-    Crear un archivo `.env.local` con las siguientes variables (ejemplo):
+2.  **Configure Environment Variables:**
+    Create a `.env.local` file:
     ```env
     NEXT_PUBLIC_FIREBASE_API_KEY=...
     NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...
     NEXT_PUBLIC_FIREBASE_PROJECT_ID=...
-    # URLs de los microservicios (para rewrites en next.config.mjs)
+    # Microservices URLs
     AUTH_SERVICE_URL=http://localhost:8001
     ORDERS_SERVICE_URL=http://localhost:8002
     PRODUCTS_SERVICE_URL=http://localhost:8003
     ```
 
-3.  **Ejecutar en desarrollo:**
+3.  **Run Development Server:**
     ```bash
     npm run dev
     ```
-    La aplicación estará disponible en `https://ucb-e-commerce.vercel.app`.
-
-## Estructura de Carpetas
-
-```
-app/
-├── admin/      # Rutas y componentes del panel de administración
-├── (shop)/     # Rutas públicas de la tienda (catálogo, carrito)
-├── api/        # Rutas API internas (si las hay)
-components/     # Componentes reutilizables (UI, Header, Guards)
-lib/            # Utilidades, clientes API y definiciones de tipos
-contexts/       # Contextos globales (CartContext)
-```
