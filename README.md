@@ -1,51 +1,48 @@
 # Orders Service - UCB Commerce
 
-Microservicio dedicado a la gestión de pedidos (órdenes) de compra dentro de la plataforma UCB Commerce.
+The transactional heart of the platform, managing the lifecycle of customer orders from cart checkout to delivery.
 
-## Descripción
+## The Problem
+E-commerce transactions are critical. A "race condition" where two students buy the last item simultaneously must be prevented. We needed a system that guarantees data integrity and provides a clear audit trail of order states.
 
-Este servicio permite a los estudiantes realizar pedidos de productos y a los administradores gestionar el estado de dichos pedidos. Implementa lógica transaccional para asegurar la integridad del stock al momento de la compra.
-
-## Tecnologías
-
-- **Lenguaje:** Python 3.10+
-- **Framework:** FastAPI
-- **Base de Datos:** Google Firestore (NoSQL)
-
-## Funcionalidades Principales
-
-- **Creación de Pedidos:**
-  - Validación de stock en tiempo real.
-  - Creación transaccional de la orden y descuento de stock.
-  - Soporte para múltiples productos en una sola orden.
-- **Historial de Pedidos:**
-  - Listado de pedidos propios para estudiantes.
-  - Listado de pedidos filtrados por carrera para administradores.
-- **Gestión de Estados:**
-  - Actualización de estados (Pendiente, Confirmado, Enviado, Entregado).
-  - Control de permisos: Solo admins de la carrera correspondiente o Platform Admins pueden cambiar el estado.
-
-## Estructura del Proyecto
-
-```
-app/
-├── core/       # Configuración y conexión a Firestore
-├── deps/       # Dependencias (validación de usuario y permisos)
-├── routers/    # Endpoints de la API (orders)
-└── schemas/    # Modelos Pydantic (CreateOrder, OrderOut, etc.)
+## Architecture
+```mermaid
+graph TD
+    Frontend -->|Create Order| API[FastAPI]
+    API -->|Verify Stock| Products[Products Service]
+    API -->|Transaction| DB[(Firestore)]
+    DB -->|Update Stock| Products
 ```
 
-## Instalación y Ejecución
+## Technical Decisions
 
-1.  **Instalar dependencias:**
+### Transactional Integrity
+We implement strict checks before order creation. The service communicates with the Products Service to lock/verify stock before confirming an order. This distributed transaction pattern ensures we never oversell inventory.
+
+### State Machine Logic
+Orders follow a strict state flow (Pending -> Confirmed -> Shipped -> Delivered). This state machine is enforced at the API level, preventing invalid transitions (e.g., moving from "Delivered" back to "Pending").
+
+## Features
+- **Order Creation**: Multi-item support with total calculation.
+- **Status Tracking**: Real-time updates for students.
+- **Admin Dashboard**: Career-specific order views for administrators.
+
+## Tech Stack
+- **Language**: Python 3.10+
+- **Framework**: FastAPI
+- **Database**: Google Firestore
+
+## Setup & Run
+
+1.  **Install dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
 
-2.  **Configurar variables de entorno:**
-    Asegurar que el archivo `.env` contenga las credenciales necesarias.
+2.  **Configure Environment Variables:**
+    Set up `.env` with Firestore credentials.
 
-3.  **Ejecutar el servidor:**
+3.  **Run Server:**
     ```bash
     uvicorn app.main:app --reload --port 8002
     ```
