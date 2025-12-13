@@ -10,7 +10,8 @@ class OrderItemIn(BaseModel):
     quantity: conint(ge=1)
 
 class CreateOrderIn(BaseModel):
-    items: List[OrderItemIn]
+    pass
+
 
 class OrderItemOut(BaseModel):
     productId: str

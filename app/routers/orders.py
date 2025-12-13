@@ -97,15 +97,31 @@ def _load_product(pid: str) -> Optional[Dict[str, Any]]:
 
 @router.post("", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
 def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
-    if not payload.items:
-        raise HTTPException(status_code=400, detail="Pedido vacío.")
+    # 1) Fetch cart from Firestore
+    cart_ref = firestore_db.collection("carts").document(user["uid"])
+    cart_doc = cart_ref.get()
+    
+    items_map = {}
+    if cart_doc.exists:
+        items_map = cart_doc.to_dict().get("items", {})
+        
+    if not items_map:
+        raise HTTPException(status_code=400, detail="Carrito vacío.")
+
+    # Convert map to list of objects for processing
+    class ItemObj:
+        def __init__(self, pid, qty):
+            self.productId = pid
+            self.quantity = qty
+            
+    cart_items = [ItemObj(pid, qty) for pid, qty in items_map.items()]
 
     products_cache: Dict[str, Dict[str, Any]] = {}
     total = 0.0
     career_tags: Set[str] = set()
 
-    # 1) Prevalidación: existencia, stock y total (no atómica, solo filtro rápido)
-    for it in payload.items:
+    # 2) Prevalidación: existencia, stock y total
+    for it in cart_items:
         prod = _load_product(it.productId)
         if not prod:
             raise HTTPException(status_code=404, detail=f"Producto {it.productId} no existe.")
@@ -120,15 +136,14 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
 
     @gcf.transactional
     def _tx_create(tx: gcf.Transaction):
-        # 2) Operaciones atómicas dentro de la TX:
-        #    Separamos lecturas de escrituras para evitar "ReadAfterWriteError"
+        # 3) Operaciones atómicas dentro de la TX
         snapshots = []
-        for it in payload.items:
+        for it in cart_items:
             p_ref = _safe_prod_ref(it.productId)
             snap = p_ref.get(transaction=tx)
             snapshots.append((snap, it, p_ref))
         
-        # Una vez leídos todos, validamos y encolamos updates
+        # Validar y encolar updates de stock
         for snap, it, p_ref in snapshots:
             if not snap.exists:
                 raise HTTPException(status_code=404, detail=f"Producto {it.productId} no existe.")
@@ -137,7 +152,7 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
                 raise HTTPException(status_code=409, detail="Stock cambió; no disponible.")
             tx.update(p_ref, {"stock": current - it.quantity})
 
-        # 3) Crear el pedido
+        # 4) Crear el pedido
         order_ref = firestore_db.collection("orders").document()
         order_payload = {
             "userId": user["uid"],
@@ -147,7 +162,7 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
                     "quantity": it.quantity,
                     "price": float(products_cache[it.productId]["price"]),
                 }
-                for it in payload.items
+                for it in cart_items
             ],
             "total": float(total),
             "status": "pending",
@@ -156,9 +171,13 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
             "updatedAt": now,
         }
         tx.set(order_ref, order_payload)
+        
+        # 5) Limpiar carrito (dentro de la transacción)
+        tx.delete(cart_ref)
+        
         return order_ref
 
-    # ejecutar transacción (con un Transaction explícito)
+    # ejecutar transacción
     tx = firestore_db.transaction()
     order_ref = _tx_create(tx)
 
