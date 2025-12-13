@@ -55,14 +55,16 @@ export function ChatWidget() {
     setLoading(true)
 
     try {
-      const res = await fetch("http://localhost:8002/chat", {
+      // Usamos el proxy interno en lugar de llamar directo al puerto 8002
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: userText,
           history: messages // Enviamos el historial actual
         }),
-        credentials: "include", // Importante para enviar cookies
+        // No es estrictamente necesario credentials: 'include' para same-origin
+        // pero asegura que las cookies viajen al proxy
       })
 
       const data = await res.json()
