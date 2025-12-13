@@ -2,16 +2,13 @@
 
 [**Live Demo**](https://ucb-e-commerce.vercel.app)
 
-A modern, responsive e-commerce interface built with Next.js 14, Tailwind CSS, and Shadcn UI.
+A modern, responsive e-commerce interface built with Next.js 14, Tailwind CSS, and Shadcn UI. Now featuring a powerful **AI Assistant**.
 
 ## The Problem
-University e-commerce platforms often suffer from fragmented user experiences, where students and administrators are forced to use disparate, outdated systems. We needed a solution that could:
-1.  Provide a seamless, "Amazon-like" shopping experience for students.
-2.  Offer a powerful, granular administration panel for career directors and platform admins.
-3.  Unify these roles into a single, performant application without sacrificing security or speed.
+University e-commerce platforms often suffer from fragmented user experiences. Students struggle to find specific products or get quick answers about stock and policies. Traditional search bars are limited, and support is often unavailable.
 
 ## The Solution
-UCB Commerce Frontend is a unified web application that dynamically adapts its interface based on user roles. It leverages Server-Side Rendering (SSR) for performance and SEO, while using a microservices architecture to offload complex logic to specialized backend services.
+UCB Commerce Frontend is a unified web application that combines a premium shopping experience with an **intelligent ReAct Agent**. It allows users to interact with the store using natural language—asking questions, managing their cart, and even placing orders directly through chat.
 
 ## Architecture
 ```mermaid
@@ -22,22 +19,41 @@ graph TD
     Frontend -->|REST API| Orders[Orders Service]
     Frontend -->|REST API| Chatbot[Chatbot Service]
     Frontend -->|REST API| Images[Images Service]
-    Chatbot -->|RAG| VectorDB[(Supabase Vector)]
+    
+    subgraph "AI Integration"
+        Chatbot -->|Reasoning| Agent[ReAct Agent]
+        Agent -->|Action| Products
+        Agent -->|Action| Orders
+        Agent -->|Navigation| Frontend
+    end
 ```
+
+## Key Features
+
+### 🤖 AI Shopping Assistant
+A persistent, intelligent chatbot that goes beyond simple Q&A:
+-   **Natural Language Search**: "Show me hoodies under 200 Bs."
+-   **Cart Management**: "Add the engineering hoodie to my cart."
+-   **Direct Ordering**: "Buy the UCB mug." (Chains add-to-cart + order creation).
+-   **Auto-Navigation**: The agent can redirect you to specific product pages automatically.
+-   **Memory**: Remembers your conversation context across page reloads.
+
+### 🛍️ Modern E-Commerce Core
+-   **Role-Based Access Control (RBAC)**: Dynamic UI for Students, Career Admins, and Platform Admins.
+-   **Real-time Cart**: Persistent shopping cart state synchronized with the backend.
+-   **Optimized Performance**: Server-Side Rendering (SSR) for critical content.
+-   **Responsive Design**: Mobile-first approach using Tailwind CSS.
 
 ## Technical Decisions
 
 ### Why Next.js 14 (App Router)?
-We chose Next.js for its **Server Components** architecture. This allows us to render critical content (like product details) on the server, improving First Contentful Paint (FCP) and SEO. It also simplifies data fetching by allowing us to call our microservices directly from the server, reducing client-side waterfalls.
+We chose Next.js for its **Server Components** architecture. This allows us to render critical content (like product details) on the server, improving First Contentful Paint (FCP) and SEO. It also simplifies data fetching by allowing us to call our microservices directly from the server.
 
 ### Why Shadcn UI + Tailwind CSS?
-Instead of a heavy component library, we used **Shadcn UI** (headless components based on Radix UI) combined with **Tailwind CSS**. This gives us:
-- **Accessibility**: Built-in keyboard navigation and screen reader support.
-- **Customization**: Full control over the design system without fighting framework overrides.
-- **Performance**: Zero runtime CSS overhead.
+Instead of a heavy component library, we used **Shadcn UI** (headless components based on Radix UI) combined with **Tailwind CSS**. This gives us accessibility, full customization control, and zero runtime CSS overhead.
 
 ### Microservices Integration
-The frontend acts as an **API Gateway** pattern implementation for the client. It aggregates data from multiple services and presents a cohesive view to the user, handling authentication tokens and error states transparently.
+The frontend acts as an **API Gateway** pattern implementation for the client. It aggregates data from multiple services and presents a cohesive view to the user.
 
 **Connected Services:**
 - [Products Service](https://github.com/ChristianMendozaa/products_service_UCB_commerce)
@@ -46,18 +62,13 @@ The frontend acts as an **API Gateway** pattern implementation for the client. I
 - [Images Service](https://github.com/ChristianMendozaa/images_services_UCB_commerce)
 - [Orders Service](https://github.com/ChristianMendozaa/orders_service_UCB_commerce)
 
-## Features
-- **Role-Based Access Control (RBAC)**: Dynamic UI for Students, Career Admins, and Platform Admins.
-- **Real-time Cart**: Persistent shopping cart state.
-- **AI Chatbot Integration**: Floating assistant for instant support.
-- **Optimized Images**: Automatic format selection and lazy loading.
-
 ## Tech Stack
-- **Framework**: Next.js 14
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **State Management**: React Context + Hooks
-- **Icons**: Lucide React
+-   **Framework**: Next.js 14
+-   **Language**: TypeScript
+-   **Styling**: Tailwind CSS
+-   **State Management**: React Context + Hooks
+-   **Icons**: Lucide React
+-   **AI Integration**: Custom Chat Widget with ReAct Agent backend
 
 ## Setup & Run
 

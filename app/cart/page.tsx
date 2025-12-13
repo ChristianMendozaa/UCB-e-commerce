@@ -36,12 +36,12 @@ export default function CartPage() {
 
   useEffect(() => {
     let mounted = true
-    ;(async () => {
-      const u = await authService.getCurrentUser().catch(() => null)
-      if (!mounted) return
-      setUser(u)
-      await load()
-    })()
+      ; (async () => {
+        const u = await authService.getCurrentUser().catch(() => null)
+        if (!mounted) return
+        setUser(u)
+        await load()
+      })()
     return () => {
       mounted = false
     }
@@ -51,7 +51,7 @@ export default function CartPage() {
   async function load() {
     setIsLoading(true)
     try {
-      const raw = getCart()
+      const raw = await getCart()
       const hydrated = await Promise.all(
         raw.map(async (it) => {
           try {
@@ -72,7 +72,7 @@ export default function CartPage() {
     if (q < 1) return
     setIsUpdating(productId)
     try {
-      lsUpdate(productId, q)
+      await lsUpdate(productId, q)
       setItems((prev) => prev.map((it) => (it.productId === productId ? { ...it, quantity: q } : it)))
       await updateCartCount?.()
       toast({ title: "Cantidad actualizada", description: "La cantidad del producto ha sido actualizada" })
@@ -84,7 +84,7 @@ export default function CartPage() {
   async function remove(productId: string) {
     setIsUpdating(productId)
     try {
-      lsRemove(productId)
+      await lsRemove(productId)
       setItems((prev) => prev.filter((it) => it.productId !== productId))
       await updateCartCount?.()
       toast({ title: "Producto eliminado", description: "El producto ha sido eliminado del carrito" })
@@ -101,10 +101,7 @@ export default function CartPage() {
       return
     }
     try {
-      const body = {
-        items: items.map((it) => ({ productId: it.productId, quantity: it.quantity })),
-      }
-      await ordersApi.createOrder(body)
+      await ordersApi.createOrder({})
       clearCart()
       await updateCartCount?.()
       toast({ title: "¡Pedido realizado!", description: "Tu pedido ha sido procesado exitosamente" })

@@ -22,9 +22,9 @@ interface ProductCardProps {
 
 export function ProductCard({ product, onAddToCart }: ProductCardProps) {
   const [quantity, setQuantity] = useState(1)
+  const { updateCartCount, optimisticAdd } = useCart()
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
-  const { updateCartCount } = useCart()
 
   const handleAddToCart = async () => {
     const user = authService.getCurrentUser()
@@ -38,16 +38,22 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
     }
 
     setIsLoading(true)
+    // Optimistic update
+    optimisticAdd(quantity)
+    toast({
+      title: "Producto agregado",
+      description: `${product.name} agregado al carrito`,
+    })
+    onAddToCart?.()
+
     try {
-      // ⬇️ Guardamos en localStorage
-      addToLocalCart(product.id, quantity)
+      // ⬇️ Guardamos en backend
+      await addToLocalCart(product.id, quantity)
+      // Confirmamos con el backend (opcional, pero buena práctica para consistencia final)
       await updateCartCount?.()
-      toast({
-        title: "Producto agregado",
-        description: `${product.name} agregado al carrito`,
-      })
-      onAddToCart?.()
     } catch (error: any) {
+      // Si falla, revertimos (o simplemente recargamos el contador real)
+      await updateCartCount?.()
       toast({
         title: "Error",
         description: error?.message || "No se pudo agregar el producto al carrito",

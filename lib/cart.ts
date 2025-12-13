@@ -1,4 +1,4 @@
-// src/lib/cart-local.ts
+// src/lib/cart.ts
 "use client"
 
 export type CartEntry = {
@@ -6,63 +6,68 @@ export type CartEntry = {
   quantity: number
 }
 
-const KEY = "ucb_cart_v1"
+export type CartResponse = {
+  userId: string
+  items: CartEntry[]
+  updatedAt?: string
+}
 
-function readRaw(): CartEntry[] {
-  if (typeof window === "undefined") return []
+async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const res = await fetch(path, {
+    ...opts,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+    },
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized")
+    throw new Error(`HTTP ${res.status}`)
+  }
+  // 204 No Content
+  if (res.status === 204) return {} as T
+  return res.json() as Promise<T>
+}
+
+export async function getCart(): Promise<CartEntry[]> {
   try {
-    const s = localStorage.getItem(KEY)
-    return s ? (JSON.parse(s) as CartEntry[]) : []
-  } catch {
+    const data = await apiFetch<CartResponse>("/api/cart")
+    return data.items || []
+  } catch (e) {
+    console.error("getCart error", e)
     return []
   }
 }
 
-function writeRaw(items: CartEntry[]) {
-  if (typeof window === "undefined") return
-  localStorage.setItem(KEY, JSON.stringify(items))
+export async function addToCart(productId: string, quantity: number): Promise<void> {
+  await apiFetch("/api/cart/items", {
+    method: "POST",
+    body: JSON.stringify({ productId, quantity }),
+  })
 }
 
-export function getCart(): CartEntry[] {
-  return readRaw()
+export async function updateQuantity(productId: string, quantity: number): Promise<void> {
+  await apiFetch("/api/cart/items", {
+    method: "PUT",
+    body: JSON.stringify({ productId, quantity }),
+  })
 }
 
-export function setCart(items: CartEntry[]) {
-  writeRaw(items)
+export async function removeFromCart(productId: string): Promise<void> {
+  await apiFetch(`/api/cart/items/${productId}`, {
+    method: "DELETE",
+  })
 }
 
-export function addToCart(productId: string, quantity: number) {
-  const q = Math.max(1, Math.floor(quantity))
-  const items = readRaw()
-  const idx = items.findIndex((x) => x.productId === productId)
-  if (idx >= 0) {
-    items[idx] = { ...items[idx], quantity: items[idx].quantity + q }
-  } else {
-    items.push({ productId, quantity: q })
-  }
-  writeRaw(items)
-}
-
-export function updateQuantity(productId: string, quantity: number) {
-  const q = Math.max(1, Math.floor(quantity))
-  const items = readRaw()
-  const idx = items.findIndex((x) => x.productId === productId)
-  if (idx >= 0) {
-    items[idx] = { ...items[idx], quantity: q }
-    writeRaw(items)
-  }
-}
-
-export function removeFromCart(productId: string) {
-  const items = readRaw().filter((x) => x.productId !== productId)
-  writeRaw(items)
-}
-
-export function clearCart() {
-  writeRaw([])
+export async function clearCart(): Promise<void> {
+  await apiFetch("/api/cart", {
+    method: "DELETE",
+  })
 }
 
 /** Total de unidades para badge del header */
-export function getCartCount(): number {
-  return readRaw().reduce((sum, it) => sum + it.quantity, 0)
+export async function getCartCount(): Promise<number> {
+  const items = await getCart()
+  return items.reduce((sum, it) => sum + it.quantity, 0)
 }

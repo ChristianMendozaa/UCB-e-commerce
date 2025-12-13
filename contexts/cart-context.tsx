@@ -3,48 +3,43 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { getCartCount } from "@/lib/cart"
-
-// Mantén el KEY sincronizado con cart-local.ts
-const CART_KEY = "ucb_cart_v1"
+import { useAuth } from "@/lib/auth"
 
 interface CartContextType {
   cartCount: number
-  updateCartCount: () => Promise<void> | void
+  updateCartCount: () => Promise<void>
+  optimisticAdd: (qty: number) => void
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined)
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [cartCount, setCartCount] = useState(0)
+  const { user } = useAuth()
 
-  const updateCartCount = () => {
-    setCartCount(getCartCount())
+  const updateCartCount = async () => {
+    if (!user) {
+      setCartCount(0)
+      return
+    }
+    try {
+      const count = await getCartCount()
+      setCartCount(count)
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const optimisticAdd = (qty: number) => {
+    setCartCount((prev) => prev + qty)
   }
 
   useEffect(() => {
-    // Inicial
     updateCartCount()
-
-    // Cambios entre pestañas
-    const onStorage = (e: StorageEvent) => {
-      if (!e.key || e.key === CART_KEY) updateCartCount()
-    }
-    window.addEventListener("storage", onStorage)
-
-    // Al volver a la pestaña/ventana
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") updateCartCount()
-    }
-    document.addEventListener("visibilitychange", onVisibility)
-
-    return () => {
-      window.removeEventListener("storage", onStorage)
-      document.removeEventListener("visibilitychange", onVisibility)
-    }
-  }, [])
+  }, [user])
 
   return (
-    <CartContext.Provider value={{ cartCount, updateCartCount }}>
+    <CartContext.Provider value={{ cartCount, updateCartCount, optimisticAdd }}>
       {children}
     </CartContext.Provider>
   )

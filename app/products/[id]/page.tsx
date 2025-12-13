@@ -10,34 +10,20 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Header } from "@/components/header"
 import { ArrowLeft, ShoppingCart, Package, Star, Truck, Shield, RefreshCw } from "lucide-react"
-import { addToCart as addToLocalCart, getCartCount } from "@/lib/cart" 
+import { addToCart as addToLocalCart, getCartCount } from "@/lib/cart"
 import type { Product } from "@/lib/products"
 import { productsApi } from "@/lib/products"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { useCart } from "@/contexts/cart-context"
 
-// helper: agregar al carrito en backend real
-async function addToCart(productId: string, quantity: number) {
-  const res = await fetch("/api/orders/cart/items", {
-    method: "POST",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ product_id: productId, quantity }),
-  })
-  if (!res.ok) throw new Error(await res.text().catch(() => ""))
-  try {
-    return await res.json()
-  } catch {
-    return {}
-  }
-}
+
 
 export default function ProductDetailPage() {
   const params = useParams()
   const router = useRouter()
   const { toast } = useToast()
-  const { updateCartCount } = useCart()
+  const { updateCartCount, optimisticAdd } = useCart()
   const [product, setProduct] = useState<Product | null>(null)
   const [quantity, setQuantity] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
@@ -76,14 +62,19 @@ export default function ProductDetailPage() {
     if (!product) return
 
     setIsAddingToCart(true)
+
+    // Optimistic
+    optimisticAdd(quantity)
+    toast({ title: "Producto agregado", description: `${product.name} agregado al carrito` })
+
     try {
-      // ⬇️ localStorage
-      addToLocalCart(product.id, quantity)
+      // ⬇️ Backend
+      await addToLocalCart(product.id, quantity)
       // si tu useCart lee del backend, cámbialo a leer de localStorage o haz:
       await updateCartCount?.() // si internamente ya usa getCartCount, perfecto
-      toast({ title: "Producto agregado", description: `${product.name} agregado al carrito` })
     } catch (error: any) {
       console.error("Error adding to cart:", error)
+      await updateCartCount?.() // revert
       toast({
         title: "Error",
         description: error?.message || "No se pudo agregar el producto al carrito",

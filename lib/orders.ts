@@ -20,7 +20,7 @@ export interface Order {
 }
 
 type CreateOrderItemIn = { productId: string; quantity: number };
-type CreateOrderIn = { items: CreateOrderItemIn[] };
+type CreateOrderIn = Record<string, never>;
 
 type ListParams = {
   status?: OrderStatus;
@@ -50,7 +50,7 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
     try {
       const j = JSON.parse(msg);
       msg = (j as any).detail || JSON.stringify(j);
-    } catch {}
+    } catch { }
     throw new Error(msg || `HTTP ${res.status}`);
   }
   return res.json() as Promise<T>;
