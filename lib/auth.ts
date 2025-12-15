@@ -22,6 +22,29 @@ export interface AuthUser {
   is_admin?: boolean; // sigue viniendo desde /me
 }
 
+/* Custom Error para distinguir 401 */
+class AuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
+type AuthEventListener = (event: "unauthorized") => void;
+const authListeners: AuthEventListener[] = [];
+
+function emitAuthEvent(event: "unauthorized") {
+  authListeners.forEach((l) => l(event));
+}
+
+export function onAuthEvent(listener: AuthEventListener) {
+  authListeners.push(listener);
+  return () => {
+    const idx = authListeners.indexOf(listener);
+    if (idx !== -1) authListeners.splice(idx, 1);
+  };
+}
+
 type MeResp = {
   uid: string;
   email?: string;
@@ -87,6 +110,15 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
     },
   });
   if (!res.ok) {
+    if (res.status === 401) {
+      // Token vencido o inválido
+      // Si opts.suppressAuthEvent es true, NO avisamos globalmente
+      if (!(opts as any).suppressAuthEvent) {
+        emitAuthEvent("unauthorized");
+      }
+      throw new AuthError("Unauthorized");
+    }
+
     let msg = await res.text().catch(() => "");
     try {
       const j = JSON.parse(msg);
@@ -211,8 +243,12 @@ class AuthService {
   }
 
   /** Obtiene /users/me desde el backend */
-  async fetchMe(): Promise<AuthUser> {
-    const data = await apiFetch<MeResp>("/api/users/me", { method: "GET" });
+  async fetchMe(suppressAuthEvent = false): Promise<AuthUser> {
+    const data = await apiFetch<MeResp>("/api/users/me", {
+      method: "GET",
+      // @ts-ignore extendemos RequestInit ad-hoc
+      suppressAuthEvent,
+    });
 
     const role = data.role ?? data.profile?.role ?? "student";
     const roles = (data.roles?.length ? data.roles : []) as AuthUser["roles"] ?? ["student"];
@@ -247,14 +283,44 @@ class AuthService {
     if (this.currentUser) return this.currentUser;
     // Siempre pide al backend el rol actual
     try {
-      const me = await this.fetchMe();
+      // Usamos suppressAuthEvent=true. Si es 401, lo manejamos aqui (limpiando)
+      // en vez de redirigir globalmente.
+      const me = await this.fetchMe(true);
       this.currentUser = me;
       return me;
-    } catch {
-      // Si falla (offline), usa cache parcial sin rol
+    } catch (e) {
+      if (e instanceof AuthError) {
+        // 401 REAL -> Limpiar sesión local porque el token no sirve
+        this.logoutLocal();
+        return null;
+      }
+      // Otros errores (network) -> Mantener cache (offline mode)
       return this.currentUser;
     }
 
+  }
+
+  /**
+   * Intenta verificar sesión contra backend sin lanzar error si falla.
+   * Útil para polling silencioso.
+   */
+  async checkSession(): Promise<boolean> {
+    try {
+      await this.fetchMe(false); // checkSession SÍ debe disparar evento si falla
+      return true;
+    } catch (e: any) {
+      // Si fue 401, el apiFetch ya disparó el evento unauthorized
+      return false;
+    }
+  }
+
+  /* Helper para limpiar local sin llamar backend (evita bucles en 401) */
+  private logoutLocal() {
+    this.currentUser = null;
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("authUser");
+      localStorage.removeItem("ucb_cart_v1");
+    }
   }
 
   /** Cerrar sesión */
@@ -272,11 +338,7 @@ class AuthService {
     }
 
     // Limpiar todo
-    this.currentUser = null;
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("authUser");
-      localStorage.removeItem("ucb_cart_v1");
-    }
+    this.logoutLocal();
   }
 
   /** Chequeos rápidos */
@@ -346,5 +408,6 @@ export function useAuth() {
     isAuthenticated: !!user,
     hasRole: authService.hasRole.bind(authService),
     canManageCareer: authService.canManageCareer.bind(authService),
+    checkSession: authService.checkSession.bind(authService),
   };
 }

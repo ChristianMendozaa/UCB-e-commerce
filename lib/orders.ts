@@ -97,6 +97,11 @@ class OrdersApi {
       body: JSON.stringify({ status }),
     });
   }
+
+  /** Admin: contar pedidos pendientes (polled) */
+  async getPendingCount(): Promise<{ count: number }> {
+    return apiFetch<{ count: number }>("/orders/pending-count", { method: "GET" });
+  }
 }
 
 export const ordersApi = new OrdersApi();

@@ -7,6 +7,7 @@ import { CartProvider } from "@/contexts/cart-context"
 import { Toaster } from "@/components/ui/toaster"
 import { ChatWidget } from "@/components/chat-widget"
 import { ThemeProvider } from "@/components/theme-provider"
+import { AuthWatcher } from "@/components/auth-watcher"
 import "./globals.css"
 
 const inter = Inter({
@@ -63,6 +64,7 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <CartProvider>
             <Suspense fallback={null}>{children}</Suspense>
+            <AuthWatcher />
             <Toaster />
             {/* 💬 Chat flotante */}
             <ChatWidget />

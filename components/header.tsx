@@ -9,11 +9,13 @@ import { ShoppingCart, Menu, X, LogOut, Package } from "lucide-react"
 import { authService, type AuthUser } from "@/lib/auth" // asegúrate que exporte is_admin opcional
 import { ThemeToggle } from "./theme-toggle"
 import { useCart } from "@/contexts/cart-context"
+import { useAdminStats } from "@/hooks/use-admin-stats"
 
 export function Header() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const { cartCount, updateCartCount } = useCart()
+  const { pendingCount } = useAdminStats()
 
   useEffect(() => {
     let mounted = true
@@ -117,8 +119,13 @@ export function Header() {
               Por Carrera
             </Link>
             {isAdmin && (
-              <Link href="/admin" className="text-sm font-medium hover:text-primary transition-colors">
+              <Link href="/admin" className="text-sm font-medium hover:text-primary transition-colors flex items-center relative">
                 Administración
+                {pendingCount > 0 && (
+                  <Badge variant="destructive" className="ml-1 h-5 min-w-[1.25rem] rounded-full p-0 px-1 flex items-center justify-center text-[10px] leading-none">
+                    {pendingCount > 99 ? "99+" : pendingCount}
+                  </Badge>
+                )}
               </Link>
             )}
           </nav>
@@ -212,7 +219,14 @@ export function Header() {
                       className="block px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
                       onClick={() => setIsMenuOpen(false)}
                     >
-                      Administración
+                      <div className="flex items-center justify-between">
+                        Administración
+                        {pendingCount > 0 && (
+                          <Badge variant="destructive" className="h-5 min-w-[1.25rem] rounded-full p-0 px-1 flex items-center justify-center text-[10px] leading-none">
+                            {pendingCount > 99 ? "99+" : pendingCount}
+                          </Badge>
+                        )}
+                      </div>
                     </Link>
                   )}
                   <div className="px-4 py-2 border-t">

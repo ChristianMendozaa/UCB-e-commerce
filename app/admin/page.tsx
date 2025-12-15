@@ -32,6 +32,7 @@ import type { Product, ProductFormState } from "@/lib/products"
 import { productsApi } from "@/lib/products"
 import { useAuth } from "@/lib/auth";
 import { Loader2 } from "lucide-react"
+import { useAdminStats } from "@/hooks/use-admin-stats"
 
 type CareerAction = { mode: "make" | "remove"; userId: string; adminCareers?: string[] } | null;
 function mapApiUserToUI(u: {
@@ -77,6 +78,8 @@ export default function AdminDashboard() {
   const lockedCareerForEdit =
     user?.platform_admin ? null :
       (user?.admin_careers?.length === 1 ? user.admin_careers[0] : null);
+
+  const { pendingCount } = useAdminStats()
 
   const [stats, setStats] = useState<DashboardStats>({
     totalProducts: 0,
@@ -622,6 +625,11 @@ export default function AdminDashboard() {
                 </TabsTrigger>
                 <TabsTrigger value="orders" className="text-xs sm:text-sm">
                   Pedidos
+                  {pendingCount > 0 && (
+                    <Badge variant="destructive" className="ml-2 h-5 min-w-[1.25rem] rounded-full p-0 px-1 flex items-center justify-center text-[10px] leading-none">
+                      {pendingCount > 99 ? "99+" : pendingCount}
+                    </Badge>
+                  )}
                 </TabsTrigger>
                 <TabsTrigger value="users" className="text-xs sm:text-sm">
                   Usuarios
