@@ -183,7 +183,48 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
 
     created = order_ref.get()
     return _doc_to_order_out(created)
+    created = order_ref.get()
+    return _doc_to_order_out(created)
+
 # ---------- Endpoints admin ----------
+
+@router.get("/pending-count")
+def get_pending_count(user=Depends(get_current_user)):
+    """
+    Devuelve la cantidad de pedidos con status='pending' visibles para este admin.
+    """
+    # 1. Validar si es admin/platform_admin
+    roles_doc = firestore_db.collection("roles").document(user["uid"]).get()
+    rdata = roles_doc.to_dict() or {}
+    is_platform_admin = bool(rdata.get("platform_admin", False))
+    is_admin = "admin" in (rdata.get("roles") or [])
+
+    if not is_platform_admin and not is_admin:
+        # Si no es admin, retorna 0 o 403. Retornemos 0 para no romper UI si se llama por error.
+        return {"count": 0}
+
+    # 2. Construir query
+    q = firestore_db.collection("orders").where("status", "==", "pending")
+
+    if not is_platform_admin:
+        # Filtrar por carreras del admin
+        careers = visible_careers_for(user["uid"])
+        if not careers:
+            return {"count": 0}
+        q = q.where("career_tags", "array_contains_any", careers)
+
+    # 3. Contar (usando aggregation query si es posible, o stream count)
+    # Firestore aggregation en python: q.count().get()[0][0].value
+    # Pero si la versión de google-cloud-firestore es vieja, fallback a stream
+    try:
+        count_query = q.count()
+        results = count_query.get()
+        return {"count": int(results[0][0].value)}
+    except Exception:
+        # Fallback manual
+        docs = q.stream()
+        return {"count": sum(1 for _ in docs)}
+
 
 @router.get("", response_model=List[OrderOut])
 def list_orders_admin(
