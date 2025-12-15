@@ -9,6 +9,8 @@ async def rag_search_tool(query: str) -> str:
     Busca información sobre productos o la universidad usando RAG.
     """
     try:
+        # Usamos raw_context_only=True implícito en la nueva lógica para obtener los datos crudos
+        # y que el Agente principal (GPT-4/Llama-3) procese la respuesta.
         result = rag_search(query)
         return result["answer"]
     except Exception as e:
@@ -88,8 +90,14 @@ async def create_order_tool(cookies: Dict[str, str] = None) -> str:
         except Exception as e:
             return f"Error de conexión: {str(e)}"
 
-def navigate_tool(product_id: str) -> str:
+def navigate_tool(target: str) -> str:
     """
     Genera un comando de navegación para el frontend.
+    Puede ser un ID de producto o una ruta relativa (ej: '/catalog').
     """
-    return json.dumps({"action": "navigate", "url": f"/products/{product_id}"})
+    if target.startswith("/"):
+        url = target
+    else:
+        url = f"/products/{target}"
+        
+    return json.dumps({"action": "navigate", "url": url})

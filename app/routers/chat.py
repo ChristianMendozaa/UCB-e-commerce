@@ -25,6 +25,7 @@ async def upload_file(file: UploadFile = File(...)):
 async def chat(request: Request, payload: dict):
     question = payload.get("question")
     history = payload.get("history", [])
+    current_page = payload.get("current_page", "/")
     
     if not question:
         raise HTTPException(400, "Falta 'question'")
@@ -33,8 +34,8 @@ async def chat(request: Request, payload: dict):
     cookies = request.cookies
 
     try:
-        # Ejecutar el agente
-        result = await run_agent(question, cookies, history)
+        # Ejecutar el agente con contexto de página
+        result = await run_agent(question, cookies, history, current_page)
         return result
     except Exception as e:
         print(f"Error en chat: {e}")

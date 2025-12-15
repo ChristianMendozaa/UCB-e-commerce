@@ -115,39 +115,10 @@ def get_answer(question: str, top_k: int = 5, source_id: str = None) -> Dict[str
     rpc = supabase.rpc("match_rag_ucbcommerce_chunks", params).execute()
     matches = rpc.data or []
 
+    # Formatear el contexto
     context = "\n\n".join([f"- {m['text']}" for m in matches])
-
-    prompt = f"""
-Eres un asistente experto del sistema de soporte de la UCB Commerce.
-Tu objetivo es ayudar a los usuarios con información sobre la universidad y los productos disponibles en la tienda.
-
-Usa exclusivamente el contexto proporcionado para responder.
-El contexto puede contener información institucional y fichas de productos (con precio, stock, categoría, etc.).
-
-Reglas:
-1. Si te preguntan por disponibilidad o stock de un producto, revisa el contexto. Si el stock es 0, indica que está agotado.
-2. Si te preguntan precios, da el precio exacto del contexto.
-3. Si la información no está en el contexto, responde: "No tengo esa información".
-4. Sé amable y conciso.
-
-Contexto:
-{context}
-
-Pregunta:
-{question}
-
-Respuesta:
-"""
-
-    completion = groq_client.chat.completions.create(
-        model="openai/gpt-oss-20b",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-    )
-
-    answer = completion.choices[0].message.content
-
+    
     return {
-        "answer": answer,
+        "answer": context if context else "No encontré información relevante en la base de conocimientos.",
         "chunks_used": matches
     }
