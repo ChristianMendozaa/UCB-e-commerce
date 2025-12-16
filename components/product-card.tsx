@@ -91,7 +91,7 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
             {product.stock <= 5 && product.stock > 0 && (
               <div className="absolute top-2 left-2">
                 <Badge variant="destructive" className="bg-destructive/80 backdrop-blur">
-                  ¡Últimas {product.stock}!
+                  ¡Últimas unidades!
                 </Badge>
               </div>
             )}

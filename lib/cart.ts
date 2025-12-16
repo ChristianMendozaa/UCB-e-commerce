@@ -30,12 +30,34 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>
 }
 
+export type CartFrontendEntry = {
+  productId: string
+  quantity: number
+  name?: string
+  price?: number
+  image?: string
+  description?: string
+  category?: string
+  career?: string
+  stock?: number
+}
+
 export async function getCart(): Promise<CartEntry[]> {
   try {
     const data = await apiFetch<CartResponse>("/api/cart")
     return data.items || []
   } catch (e) {
     console.error("getCart error", e)
+    return []
+  }
+}
+
+export async function getCartDetails(): Promise<CartFrontendEntry[]> {
+  try {
+    const data = await apiFetch<{ items: CartFrontendEntry[] }>("/api/cart/details")
+    return data.items || []
+  } catch (e) {
+    console.error("getCartDetails error", e)
     return []
   }
 }

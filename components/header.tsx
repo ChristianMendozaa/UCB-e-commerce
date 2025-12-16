@@ -5,7 +5,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ShoppingCart, Menu, X, LogOut, Package } from "lucide-react"
+import { ShoppingCart, Menu, X, LogOut, Package, Loader2 } from "lucide-react"
 import { authService, type AuthUser } from "@/lib/auth" // asegúrate que exporte is_admin opcional
 import { ThemeToggle } from "./theme-toggle"
 import { useCart } from "@/contexts/cart-context"
@@ -14,9 +14,11 @@ import { useAdminStats } from "@/hooks/use-admin-stats"
 export function Header() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
   const { cartCount, updateCartCount } = useCart()
   const { pendingCount } = useAdminStats()
 
+  // ... (useEffect logic remains same) ...
   useEffect(() => {
     let mounted = true
       ; (async () => {
@@ -85,9 +87,16 @@ export function Header() {
   const firstName = user?.name ? user.name.split(" ")[0] : ""
 
   const handleLogout = async () => {
-    await authService.logout()
-    setUser(null)
-    window.location.href = "/"
+    if (isLoggingOut) return
+    setIsLoggingOut(true)
+    try {
+      await authService.logout()
+      setUser(null)
+      window.location.href = "/"
+    } catch (error) {
+      console.error("Logout error", error)
+      setIsLoggingOut(false)
+    }
   }
 
   return (
@@ -162,8 +171,12 @@ export function Header() {
                   <div className="text-right">
                     <p className="text-sm font-medium">{firstName}</p>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={handleLogout}>
-                    <LogOut className="h-4 w-4" />
+                  <Button variant="ghost" size="sm" onClick={handleLogout} disabled={isLoggingOut}>
+                    {isLoggingOut ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      <LogOut className="h-4 w-4" />
+                    )}
                   </Button>
                 </div>
               </>
@@ -236,9 +249,11 @@ export function Header() {
                   </div>
                   <button
                     onClick={handleLogout}
-                    className="block w-full text-left px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
+                    disabled={isLoggingOut}
+                    className="flex w-full items-center justify-between px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors text-left"
                   >
-                    Cerrar Sesión
+                    <span>Cerrar Sesión</span>
+                    {isLoggingOut && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
                   </button>
                 </>
               ) : (

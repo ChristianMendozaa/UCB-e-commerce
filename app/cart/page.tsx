@@ -15,7 +15,7 @@ import { Plus, Minus, Trash2, ShoppingBag, ArrowLeft, CreditCard, LogIn } from "
 import { authService, type AuthUser } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { useCart } from "@/contexts/cart-context"
-import { getCart, updateQuantity as lsUpdate, removeFromCart as lsRemove, clearCart } from "@/lib/cart"
+import { getCart, getCartDetails, updateQuantity as lsUpdate, removeFromCart as lsRemove, clearCart } from "@/lib/cart"
 import { productsApi, type Product } from "@/lib/products"
 import { ordersApi } from "@/lib/orders"
 
@@ -51,18 +51,27 @@ export default function CartPage() {
   async function load() {
     setIsLoading(true)
     try {
-      const raw = await getCart()
-      const hydrated = await Promise.all(
-        raw.map(async (it) => {
-          try {
-            const p = await productsApi.getProduct(it.productId)
-            return { ...it, product: p }
-          } catch {
-            return { ...it, product: undefined }
-          }
-        }),
-      )
-      setItems(hydrated.filter((x) => !!x.product))
+      // Use the optimized endpoint that returns everything in one request
+      const items = await getCartDetails()
+
+      const hydrated: HydratedItem[] = items.map(it => ({
+        productId: it.productId,
+        quantity: it.quantity,
+        product: {
+          id: it.productId,
+          name: it.name || "Producto desconocido",
+          price: it.price || 0,
+          image: it.image || "/placeholder.svg",
+          description: it.description || "",
+          category: it.category || "",
+          career: it.career || "",
+          stock: it.stock || 0,
+          createdAt: "",
+          updatedAt: "",
+          createdBy: ""
+        }
+      }))
+      setItems(hydrated)
     } finally {
       setIsLoading(false)
     }
