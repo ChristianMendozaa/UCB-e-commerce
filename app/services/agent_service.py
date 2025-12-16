@@ -102,6 +102,7 @@ Eres el asistente de UCB Commerce. Ayuda a buscar productos, gestionar carrito y
 
 REGLAS:
 - **IDIOMA**: Responde SIEMPRE en el idioma del usuario. Si te hablan en inglés, responde en inglés.
+- **RAZONAMIENTO**: Antes de usar herramientas, piensa brevemente qué necesitas hacer.
 - IDs son cadenas (ej: "ne8jwGSSjCqzPXRLzq8r").
 - **NUNCA pidas ID**. Búscalo tú con `rag_search_tool`.
 - **NAVEGACIÓN**: 
@@ -119,6 +120,7 @@ REGLAS:
 async def run_agent(question: str, cookies: Dict[str, str] = None, history: List[Dict[str, str]] = [], current_page: str = "/") -> Dict[str, Any]:
     """
     Ejecuta el agente usando Tool Calling Nativo y Ejecución Paralela.
+    Retorna respuesta y traza de ejecución.
     """
     # Construir historial previo con contexto de página
     messages = [
@@ -136,6 +138,9 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
     max_steps = 10
     current_step = 0
     navigation_command = None
+    
+    # Estructura para el trace del frontend
+    agent_trace = []
 
     # Contadores de costos
     total_input_tokens = 0
@@ -166,6 +171,14 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
         message = completion.choices[0].message
         messages.append(message)
         
+        # Capturar Pensamiento (si existe)
+        if message.content:
+            agent_trace.append({
+                "type": "thought",
+                "content": message.content,
+                "step": current_step + 1
+            })
+        
         # 2. Verificar output
         if not message.tool_calls:
             answer = message.content or ""
@@ -179,7 +192,11 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
             logger.info(f"💰 COSTO CONSULTA: ${total_cost:.6f} USD | "
                         f"Inputs: {total_input_tokens} | Outputs: {total_output_tokens}")
             
-            return {"answer": answer}
+            return {
+                "answer": answer,
+                "trace": agent_trace,
+                "cost": total_cost 
+            }
 
         # 3. Preparar ejecución paralela
         coroutines = []
@@ -191,6 +208,14 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
                 function_args = json.loads(tool_call.function.arguments)
             except json.JSONDecodeError:
                 function_args = {}
+            
+            # Registrar uso de herramienta en trace
+            agent_trace.append({
+                "type": "tool_call",
+                "name": function_name,
+                "args": function_args,
+                "step": current_step + 1
+            })
 
             # Agregamos la coroutina a la lista de ejecución
             coroutines.append(execute_tool(function_name, function_args, cookies))
@@ -212,6 +237,14 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
             if mapping["name"] == "navigate_tool":
                 navigation_command = result
             
+            # Registrar resultado en trace
+            agent_trace.append({
+                "type": "tool_result",
+                "name": mapping["name"],
+                "content": str(result),
+                "step": current_step + 1
+            })
+            
             messages.append({
                 "tool_call_id": mapping["id"],
                 "role": "tool",
@@ -221,7 +254,7 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
             
         current_step += 1
 
-    return {"answer": "Lo siento, alcancé el límite de pasos."}
+    return {"answer": "Lo siento, alcancé el límite de pasos.", "trace": agent_trace}
 
 async def execute_tool(name: str, args: Dict[str, Any], cookies: Dict[str, str]) -> str:
     if name == "rag_search_tool":
