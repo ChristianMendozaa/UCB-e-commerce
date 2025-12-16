@@ -30,10 +30,12 @@ class AuthError extends Error {
   }
 }
 
-type AuthEventListener = (event: "unauthorized") => void;
+// Event System for Reactivity
+type AuthEventType = "unauthorized" | "user_changed";
+type AuthEventListener = (event: AuthEventType) => void;
 const authListeners: AuthEventListener[] = [];
 
-function emitAuthEvent(event: "unauthorized") {
+function emitAuthEvent(event: AuthEventType) {
   authListeners.forEach((l) => l(event));
 }
 
@@ -144,6 +146,10 @@ class AuthService {
     }
   }
 
+  private notifyUserChange() {
+    emitAuthEvent("user_changed");
+  }
+
   /** Lista usuarios (requiere admin o platform_admin) */
   async listUsers(): Promise<Array<{
     uid: string;
@@ -238,6 +244,7 @@ class AuthService {
     const me = await this.fetchMe();
     this.currentUser = me;
     localStorage.setItem("authUser", JSON.stringify(me));
+    this.notifyUserChange(); // NOTIFY
 
     return me;
   }
@@ -275,6 +282,7 @@ class AuthService {
     if (typeof window !== "undefined") {
       localStorage.setItem("authUser", JSON.stringify(user));
     }
+    this.notifyUserChange(); // NOTIFY
     return user;
   }
 
@@ -316,10 +324,17 @@ class AuthService {
 
   /* Helper para limpiar local sin llamar backend (evita bucles en 401) */
   private logoutLocal() {
+    const hadUser = this.currentUser !== null || (typeof window !== "undefined" && !!localStorage.getItem("authUser"));
+
     this.currentUser = null;
     if (typeof window !== "undefined") {
       localStorage.removeItem("authUser");
       localStorage.removeItem("ucb_cart_v1");
+    }
+
+    // Solo notificamos si hubo un cambio real (evita bucle infinito en 401)
+    if (hadUser) {
+      this.notifyUserChange();
     }
   }
 
@@ -380,12 +395,23 @@ export function useAuth() {
 
   useEffect(() => {
     let mounted = true;
+
+    // Initial fetch
     authService
       .getCurrentUser()
       .then((u) => mounted && setUser(u))
       .finally(() => mounted && setIsLoading(false));
+
+    // Subscribe to changes
+    const unsubscribe = onAuthEvent((event) => {
+      if (event === "user_changed" && mounted) {
+        authService.getCurrentUser().then(u => setUser(u));
+      }
+    });
+
     return () => {
       mounted = false;
+      unsubscribe();
     };
   }, []);
 
