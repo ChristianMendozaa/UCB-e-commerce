@@ -10,6 +10,7 @@ import { authService, type AuthUser } from "@/lib/auth" // asegúrate que export
 import { ThemeToggle } from "./theme-toggle"
 import { useCart } from "@/contexts/cart-context"
 import { useAdminStats } from "@/hooks/use-admin-stats"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export function Header() {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -167,11 +168,18 @@ export function Header() {
                 </Link>
 
                 {/* User Menu */}
-                <div className="hidden md:flex items-center space-x-6">
-                  <div className="text-right">
-                    <p className="text-sm font-medium">{firstName}</p>
+                <div className="hidden md:flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="text-right hidden lg:block">
+                      <p className="text-sm font-medium leading-none">{user.name}</p>
+                      <p className="text-xs text-muted-foreground">{isAdmin ? "Administrador" : "Estudiante"}</p>
+                    </div>
+                    <Avatar>
+                      <AvatarImage src={user.photoURL} alt={user.name} />
+                      <AvatarFallback>{firstName.substring(0, 2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={handleLogout} disabled={isLoggingOut}>
+                  <Button variant="ghost" size="icon" onClick={handleLogout} disabled={isLoggingOut}>
                     {isLoggingOut ? (
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     ) : (
@@ -242,10 +250,18 @@ export function Header() {
                       </div>
                     </Link>
                   )}
-                  <div className="px-4 py-2 border-t">
-                    <p className="text-sm font-medium">{user.name}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{isAdmin ? "admin" : user.role}</p>
-                    {user.career && <p className="text-xs text-muted-foreground">{user.career}</p>}
+                  <div className="px-4 py-4 border-t flex items-center gap-3">
+                    <Avatar>
+                      <AvatarImage src={user.photoURL} alt={user.name} />
+                      <AvatarFallback>{firstName.substring(0, 2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col">
+                      <p className="text-sm font-medium">{user.name}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span className="capitalize">{isAdmin ? "admin" : user.role}</span>
+                        {user.career && <span>• {user.career}</span>}
+                      </div>
+                    </div>
                   </div>
                   <button
                     onClick={handleLogout}
