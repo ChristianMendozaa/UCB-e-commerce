@@ -16,6 +16,40 @@ async def rag_search_tool(query: str) -> str:
     except Exception as e:
         return f"Error buscando información: {str(e)}"
 
+async def get_cart_tool(cookies: Dict[str, str] = None) -> str:
+    """
+    Obtiene los items actuales del carrito del usuario.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(
+                f"{PRODUCTS_API_URL}/api/cart/chatbot",
+                cookies=cookies
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items", [])
+                if not items:
+                    return "El carrito está vacío."
+                
+                # Devolvemos los datos crudos (pero legibles) para que el LLM decida cómo presentarlos
+                # El usuario pidió explícitamente NO formatear en código.
+                summary_items = []
+                for item in items:
+                    summary_items.append({
+                        "product_id": item.get('productId'),
+                        "name": item.get('name', 'Producto Desconocido'),
+                        "quantity": item.get('quantity', 0),
+                        "price": item.get('price', 0),
+                        "subtotal": item.get('price', 0) * item.get('quantity', 0),
+                        "currency": "Bs."
+                    })
+                
+                return json.dumps(summary_items, ensure_ascii=False)
+            return f"Error obteniendo carrito: {resp.text}"
+        except Exception as e:
+            return f"Error de conexión: {str(e)}"
+
 async def add_to_cart_tool(product_id: str, quantity: int, cookies: Dict[str, str] = None) -> str:
     """
     Agrega un producto al carrito del usuario.

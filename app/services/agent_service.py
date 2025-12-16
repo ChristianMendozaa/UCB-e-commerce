@@ -10,7 +10,10 @@ from app.core.tools import (
     remove_from_cart_tool,
     clear_cart_tool,
     create_order_tool,
-    navigate_tool
+    clear_cart_tool,
+    create_order_tool,
+    navigate_tool,
+    get_cart_tool
 )
 
 logging.basicConfig(
@@ -34,6 +37,14 @@ TOOLS_SCHEMA = [
                 },
                 "required": ["query"]
             }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_cart_tool",
+            "description": "Obtiene los productos actuales en el carrito.",
+            "parameters": {"type": "object", "properties": {}}
         }
     },
     {
@@ -102,6 +113,7 @@ Eres el asistente de UCB Commerce. Ayuda a buscar productos, gestionar carrito y
 
 REGLAS:
 - **IDIOMA**: Responde SIEMPRE en el idioma del usuario. Si te hablan en inglés, responde en inglés.
+- **MONEDA**: Todos los precios están en Bolivianos (Bs.).
 - **RAZONAMIENTO**: Antes de usar herramientas, piensa brevemente qué necesitas hacer.
 - IDs son cadenas (ej: "ne8jwGSSjCqzPXRLzq8r").
 - **NUNCA pidas ID**. Búscalo tú con `rag_search_tool`.
@@ -114,6 +126,7 @@ REGLAS:
         * "Mis pedidos" -> `navigate_tool('/orders')`
 - **CONTEXTO**: Si piden "Mochila" y tienes ID de "Hoodie", ¡BUSCA EL NUEVO ID! No recicles.
 - **COMPRA**: "Quiero comprar X" => `add_to_cart_tool` + `create_order_tool`.
+- **CARRITO**: Si preguntan "qué tengo en el carrito", usa `get_cart_tool`.
 - **PROACTIVIDAD**: Ofrece agregar al carrito.
 """
 
@@ -259,6 +272,8 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
 async def execute_tool(name: str, args: Dict[str, Any], cookies: Dict[str, str]) -> str:
     if name == "rag_search_tool":
         return await rag_search_tool(args.get("query"))
+    elif name == "get_cart_tool":
+        return await get_cart_tool(cookies)
     elif name == "add_to_cart_tool":
         return await add_to_cart_tool(args.get("product_id"), args.get("quantity", 1), cookies)
     elif name == "remove_from_cart_tool":
