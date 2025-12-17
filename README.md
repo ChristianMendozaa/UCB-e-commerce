@@ -113,8 +113,10 @@ By implementing granular `CostLogging`, we tracked token usage across real sessi
 | **Complex Multi-Item** | High | ~ 1.5s | **$0.001324** |
 | **Casual Chat** | Low | < 0.5s | **$0.000294** |
 
-**Projected Scale**:
-For a deployment with **1,000 active monthly users** (approx. 10 interactions/user), the total predicted API cost is **under $7.00 USD/month**.
+**Projected Scale (10,000 active monthly users)**:
+-   **Average Estimate:** ~$47.62 USD / month
+-   **Moderate Use:** ~$12.00 / month
+-   **Intensive Use:** ~$83.25 / month
 
 ---
 
