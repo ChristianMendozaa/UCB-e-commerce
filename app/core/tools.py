@@ -20,6 +20,8 @@ async def get_cart_tool(cookies: Dict[str, str] = None) -> str:
     """
     Obtiene los items actuales del carrito del usuario.
     """
+    if not cookies or "session" not in cookies:
+        return "AUTH_REQUIRED"
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.get(
@@ -54,6 +56,9 @@ async def add_to_cart_tool(product_id: str, quantity: int, cookies: Dict[str, st
     """
     Agrega un producto al carrito del usuario.
     """
+    if not cookies or "session" not in cookies:
+        return "AUTH_REQUIRED"
+    
     if not product_id or not product_id.strip():
         return "Error: ID de producto inválido (vacío)."
     
@@ -74,6 +79,9 @@ async def remove_from_cart_tool(product_id: str, cookies: Dict[str, str] = None)
     """
     Elimina un producto del carrito.
     """
+    if not cookies or "session" not in cookies:
+        return "AUTH_REQUIRED"
+
     if not product_id or not product_id.strip():
         return "Error: ID de producto inválido (vacío)."
 
@@ -93,6 +101,8 @@ async def clear_cart_tool(cookies: Dict[str, str] = None) -> str:
     """
     Vacía el carrito de compras.
     """
+    if not cookies or "session" not in cookies:
+        return "AUTH_REQUIRED"
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.delete(
@@ -109,6 +119,8 @@ async def create_order_tool(cookies: Dict[str, str] = None) -> str:
     """
     Crea un pedido con los items actuales del carrito.
     """
+    if not cookies or "session" not in cookies:
+        return "AUTH_REQUIRED"
     async with httpx.AsyncClient() as client:
         try:
             # El endpoint de orders espera un body vacío ahora

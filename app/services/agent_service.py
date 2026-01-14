@@ -154,6 +154,7 @@ REGLAS:
 -   Moneda: Bs.
 -   NO inventes IDs.
 -   Si el usuario dice "mostrame la pagina de por carrera", la respuesta es `navigate_tool("/careers")`.
+-   Si una herramienta devuelve "AUTH_REQUIRED", responde explicando que necesitan iniciar sesión.
 """
 
 async def run_agent(question: str, cookies: Dict[str, str] = None, history: List[Dict[str, str]] = [], current_page: str = "/") -> Dict[str, Any]:
@@ -283,6 +284,12 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
                 "content": str(result),
                 "step": current_step + 1
             })
+
+            # Manejo especial de AUTH_REQUIRED
+            if result == "AUTH_REQUIRED":
+                # Forzar navegación al login
+                navigation_command = navigate_tool("/login")
+                result = "Para realizar esta acción necesitas iniciar sesión. Te estoy redirigiendo..."
             
             messages.append({
                 "tool_call_id": mapping["id"],
