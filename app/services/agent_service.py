@@ -189,24 +189,29 @@ async def run_agent(question: str, cookies: Dict[str, str] = None, history: List
     OUTPUT_PRICE_PER_M = 0.60
     
     while current_step < max_steps:
-        # 1. Llamar al LLM con tools
-        try:
-            completion = groq_client.chat.completions.create(
-                model="openai/gpt-oss-20b", 
-                messages=messages,
-                tools=TOOLS_SCHEMA,
-                tool_choice="auto",
-                temperature=0.1
-            )
-            
-            # Acumular uso de tokens
-            if completion.usage:
-                total_input_tokens += completion.usage.prompt_tokens
-                total_output_tokens += completion.usage.completion_tokens
-                
-        except Exception as e:
-            logger.error(f"Error calling LLM: {e}")
-            return {"answer": "Lo siento, hubo un error técnico con mi cerebro digital."}
+        # 1. Llamar al LLM con tools (Retry Logic)
+        completion = None
+        for attempt in range(3):
+            try:
+                completion = groq_client.chat.completions.create(
+                    model="openai/gpt-oss-20b", 
+                    messages=messages,
+                    tools=TOOLS_SCHEMA,
+                    tool_choice="auto",
+                    temperature=0.1
+                )
+                break # Éxito
+            except Exception as e:
+                logger.error(f"Error calling LLM (Intento {attempt+1}/3): {e}")
+                if attempt < 2:
+                    await asyncio.sleep(2 * (attempt + 1)) # Backoff: 2s, 4s...
+                else:
+                    return {"answer": "Lo siento, mi cerebro digital está un poco saturado. Por favor intenta de nuevo en unos segundos."}
+        
+        # Acumular uso de tokens (si hubo éxito)
+        if completion and completion.usage:
+            total_input_tokens += completion.usage.prompt_tokens
+            total_output_tokens += completion.usage.completion_tokens
         
         message = completion.choices[0].message
         messages.append(message)
