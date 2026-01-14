@@ -124,6 +124,16 @@ async def create_order_tool(cookies: Dict[str, str] = None) -> str:
         except Exception as e:
             return f"Error de conexión: {str(e)}"
 
+def navigate_tool(target: str) -> str:
+    """
+    Genera un comando de navegación para el frontend.
+    Puede ser un ID de producto o una ruta relativa (ej: '/catalog').
+    """
+    if target.startswith("/"):
+        url = target
+    else:
+        url = f"/products/{target}"
+        
     return json.dumps({"action": "navigate", "url": url})
 
 async def search_products_tool(query: str) -> str:
