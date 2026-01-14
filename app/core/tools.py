@@ -124,14 +124,39 @@ async def create_order_tool(cookies: Dict[str, str] = None) -> str:
         except Exception as e:
             return f"Error de conexión: {str(e)}"
 
-def navigate_tool(target: str) -> str:
-    """
-    Genera un comando de navegación para el frontend.
-    Puede ser un ID de producto o una ruta relativa (ej: '/catalog').
-    """
-    if target.startswith("/"):
-        url = target
-    else:
-        url = f"/products/{target}"
-        
     return json.dumps({"action": "navigate", "url": url})
+
+async def search_products_tool(query: str) -> str:
+    """
+    Busca productos por nombre o descripción usando la API de productos (búsqueda simple).
+    Útil cuando el RAG no encuentra exactitudes o para búsquedas cortas.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            # Usamos la ruta pública que ya soporta búsqueda "q"
+            resp = await client.get(
+                f"{PRODUCTS_API_URL}/api/products/public",
+                params={"q": query, "limit": 5}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items", [])
+                if not items:
+                    return "No encontré productos con ese término en la base de datos."
+                
+                # Formatear respuesta para el LLM
+                results = []
+                for item in items:
+                    results.append({
+                        "id": item.get("id"),
+                        "name": item.get("name"),
+                        "price": item.get("price"),
+                        "stock": item.get("stock"),
+                        "career": item.get("career"),
+                        "category": item.get("category")
+                    })
+                return json.dumps(results, ensure_ascii=False)
+            return f"Error buscando productos: {resp.text}"
+        except Exception as e:
+            return f"Error de conexión: {str(e)}"
+

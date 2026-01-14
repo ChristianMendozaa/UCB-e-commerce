@@ -13,7 +13,9 @@ from app.core.tools import (
     clear_cart_tool,
     create_order_tool,
     navigate_tool,
-    get_cart_tool
+    navigate_tool,
+    get_cart_tool,
+    search_products_tool
 )
 
 logging.basicConfig(
@@ -34,6 +36,20 @@ TOOLS_SCHEMA = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Consulta de búsqueda"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_products_tool",
+            "description": "Busca productos por nombre (ej: 'mochila', 'hoodie'). Usar si RAG falla o para búsquedas generales.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Término de búsqueda (ej: 'mochila')"}
                 },
                 "required": ["query"]
             }
@@ -111,29 +127,33 @@ TOOLS_SCHEMA = [
 SYSTEM_PROMPT = """
 Eres el vendedor de UCB Commerce (Bs.).
 
-TU OBJETIVO PRINCIPAL: Entender la INTENCIÓN del usuario antes de actuar.
+TU OBJETIVO PRINCIPAL: Entender la INTENCIÓN del usuario y mostrarle los productos correctos usando las herramientas.
+
+ESTRATEGIA DE BÚSQUEDA:
+1.  **Primero INTENTA** buscar con `rag_search_tool` para obtener contexto semántico (ej: "algo para sistemas").
+2.  **SI FALLA o es muy específico** (ej: "mochila", "bolígrafo"), USA `search_products_tool(query="...")` para buscar por nombre exacto/parcial.
+3.  **SI AMBAS FALLAN**, pide más detalles amablemente.
+
+NAVEGACIÓN CORRECTA (IMPORTANTE):
+-   **Productos por Carrera**: USA `navigate_tool(target="/careers")`.
+-   **Carrera Específica**: USA `navigate_tool(target="/careers/CODIGO")` (ej: `/careers/ADM`, `/careers/SIS`, `/careers/MEC`).
+-   **Catálogo General**: USA `navigate_tool(target="/catalog")`.
+-   **Ver Producto**: USA `navigate_tool(target="ID_PRODUCTO")`.
+-   **Carrito**: USA `navigate_tool(target="/cart")`.
 
 PASOS DE PENSAMIENTO:
-1. ¿Qué pide el usuario? ¿Es específico (ej: "Hoodie SIS") o vago (ej: "el hoodie")?
-2. Si busca algo, usa `rag_search_tool`.
-3. ANALIZA LOS RESULTADOS:
-    - ¿Encontraste VARIOS productos? -> ¡PREGUNTA! No asumas cuál quiere. Muestra opciones.
-    - ¿Encontraste UNO solo? -> Procede.
-4. NUNCA elijas un producto al azar si hay ambigüedad.
-
-EJEMPLOS DE COMPORTAMIENTO:
-- Usuario: "Quiero el hoodie"
-- Resultados: [Hoodie SIS, Hoodie Civil, Hoodie Cato]
-- TU RESPUESTA: "Encontré varios hoodies: SIS, Civil y Cato. ¿Cuál te interesa?" (NO uses navigate_tool aún)
-
-- Usuario: "Ver o mostrame la mochila o cualquier intencion de visualizar cierta pagina o producto"
-- Resultados: [Mochila Negra]
-- TU RESPUESTA: Usar `navigate_tool` para la Mochila Negra.
+1.  ¿Qué pide el usuario?
+2.  ¿Necesito buscar información? -> `rag_search_tool` o `search_products_tool`.
+3.  ¿Necesito mostrar una página? -> `navigate_tool` con la ruta CORRECTA.
+4.  ANÁLISIS DE RESULTADOS:
+    -   ¿Varios productos? -> Muestra opciones y pregunta.
+    -   ¿Uno solo? -> Muestra detalle y `navigate_tool`.
 
 REGLAS:
-- Idioma: Igual al usuario.
-- Moneda: Bolivianos (Bs.).
-- NO inventes IDs.
+-   Idioma: Español.
+-   Moneda: Bs.
+-   NO inventes IDs.
+-   Si el usuario dice "mostrame la pagina de por carrera", la respuesta es `navigate_tool("/careers")`.
 """
 
 async def run_agent(question: str, cookies: Dict[str, str] = None, history: List[Dict[str, str]] = [], current_page: str = "/") -> Dict[str, Any]:
@@ -290,5 +310,7 @@ async def execute_tool(name: str, args: Dict[str, Any], cookies: Dict[str, str])
         return await create_order_tool(cookies)
     elif name == "navigate_tool":
         return navigate_tool(args.get("target"))
+    elif name == "search_products_tool":
+        return await search_products_tool(args.get("query"))
     else:
         return f"Error: Herramienta '{name}' no encontrada."
