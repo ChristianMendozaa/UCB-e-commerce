@@ -126,7 +126,7 @@ EJEMPLOS DE COMPORTAMIENTO:
 - Resultados: [Hoodie SIS, Hoodie Civil, Hoodie Cato]
 - TU RESPUESTA: "Encontré varios hoodies: SIS, Civil y Cato. ¿Cuál te interesa?" (NO uses navigate_tool aún)
 
-- Usuario: "Muestrame o mostrame (cualquier intencion de ver el producto) mochila o cualquier intencion de visualizar cierta pagina o producto"
+- Usuario: "Ver o mostrame la mochila o cualquier intencion de visualizar cierta pagina o producto"
 - Resultados: [Mochila Negra]
 - TU RESPUESTA: Usar `navigate_tool` para la Mochila Negra.
 
