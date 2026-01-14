@@ -192,10 +192,15 @@ export function ChatWidget() {
                   <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                     <MessageCircle className="h-8 w-8 text-[#003366] dark:text-blue-400" />
                   </div>
-                  <p className="font-medium text-foreground">¡Hola! 👋</p>
-                  <p className="text-xs mt-2 leading-relaxed">
-                    Soy tu asistente virtual de la UCB. Puedo ayudarte a buscar productos, ver precios o gestionar tu pedido.
+                  <p className="font-medium text-foreground">¡Hola! 👋 Bienvenido a UCB Commerce.</p>
+                  <p className="text-xs mt-2 leading-relaxed text-muted-foreground">
+                    Soy tu asistente virtual con IA. Puedo ayudarte a:
                   </p>
+                  <ul className="text-xs text-left list-disc list-inside mt-2 space-y-1 text-muted-foreground">
+                    <li>🔍 <b>Buscar productos</b> ("Busca hoodies de sistemas")</li>
+                    <li>💰 <b>Consultar precios</b> ("¿Cuánto cuesta la taza?")</li>
+                    <li>🛒 <b>Gestionar tu carrito</b> ("Agrega la mochila")</li>
+                  </ul>
                 </div>
               )}
 
@@ -225,8 +230,8 @@ export function ChatWidget() {
                   <div className={`flex flex-col gap-1 max-w-[85%] ${m.sender === "user" ? "items-end" : "items-start"}`}>
                     <div
                       className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm w-full ${m.sender === "user"
-                          ? "bg-[#003366] text-white rounded-tr-none"
-                          : "bg-white dark:bg-zinc-800 border text-foreground rounded-tl-none"
+                        ? "bg-[#003366] text-white rounded-tr-none"
+                        : "bg-white dark:bg-zinc-800 border text-foreground rounded-tl-none"
                         }`}
                     >
                       {m.sender === "bot" ? (
