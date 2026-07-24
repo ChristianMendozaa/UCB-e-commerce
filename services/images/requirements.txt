@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pillow
+firebase-admin
+python-multipart

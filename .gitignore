@@ -1,27 +1,57 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Local environment and secret files
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
 
-# dependencies
-/node_modules
+# Credentials and private keys
+.npmrc
+.netrc
+.ssh/
+credentials*.json
+**/credentials*.json
+serviceAccountKey.json
+firebase.json
+**/serviceAccountKey.json
+**/firebase.json
+**/client_secret.json
+*.pem
+*.key
+*.p12
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files
-.env*
-
-# vercel
-.vercel
-
-# typescript
+# JavaScript / Next.js
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+out/
+**/out/
 *.tsbuildinfo
 next-env.d.ts
+*.log
+
+# Python
+.venv/
+**/.venv/
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+
+# Tooling
+.vercel/
+**/.vercel/
+.idea/
+.vscode/
+.DS_Store
+coverage/
+htmlcov/

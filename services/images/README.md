@@ -1,0 +1,47 @@
+# Images service
+
+FastAPI service that validates, converts, stores, and serves product images.
+Image bytes are encoded as Base64 and persisted in the configured Firestore
+collection; the container filesystem is not used for durable storage.
+
+Original uploads have a hard 4 MiB limit. Only static JPEG, PNG, and WebP
+bytes are accepted; the declared upload MIME type and extension are never
+trusted. Pillow verifies the bytes and dimensions, strips metadata and
+trailing payloads by re-encoding the image, and derives the stored MIME type
+and filename extension from the detected format. SVG, HTML, animated images,
+invalid files, and images above the configured dimension limits are rejected.
+
+`MAX_B64_BYTES` defaults to 983,040 bytes and is always clamped to that value.
+This reserves 64 KiB below Firestore's 1 MiB document limit for field names,
+metadata, and document encoding. If a normalized image exceeds the limit, the
+service can convert it to WebP before rejecting it. Decode limits default to
+8,192 pixels per side and 25,000,000 total pixels:
+
+```dotenv
+MAX_B64_BYTES=983040
+MAX_IMAGE_WIDTH=8192
+MAX_IMAGE_HEIGHT=8192
+MAX_IMAGE_PIXELS=25000000
+```
+
+Downloaded images include `X-Content-Type-Options: nosniff`, a restrictive
+Content Security Policy, and `Cross-Origin-Resource-Policy: same-origin`.
+The same-origin Next.js image proxy enforces the same response headers.
+
+This service is part of the UCB Commerce monorepo. Run the full system from
+the repository root:
+
+```bash
+docker compose up --build
+```
+
+For direct development, copy `.env.example` to `.env`, install
+`requirements.txt`, and start:
+
+```bash
+uvicorn main:app --reload --port 8005
+```
+
+The Docker image uses Python 3.12, listens on the platform-provided `PORT`,
+and runs as a non-root user. Firebase credentials are supplied only through
+environment variables.

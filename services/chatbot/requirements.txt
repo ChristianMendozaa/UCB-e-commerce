@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+openai>=1.109.0
+supabase
+httpx
+python-multipart

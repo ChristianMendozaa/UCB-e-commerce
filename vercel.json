@@ -1,0 +1,97 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "apps/web",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "auth",
+          "format": "url",
+          "env": "AUTH_API_URL"
+        },
+        {
+          "type": "service",
+          "service": "orders",
+          "format": "url",
+          "env": "ORDERS_API_URL"
+        },
+        {
+          "type": "service",
+          "service": "products",
+          "format": "url",
+          "env": "PRODUCTS_API_URL"
+        },
+        {
+          "type": "service",
+          "service": "chatbot",
+          "format": "url",
+          "env": "CHATBOT_API_URL"
+        },
+        {
+          "type": "service",
+          "service": "images",
+          "format": "url",
+          "env": "IMAGE_SERVICE_BASE_URL"
+        }
+      ]
+    },
+    "auth": {
+      "root": "services/auth",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel"
+    },
+    "orders": {
+      "root": "services/orders",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel"
+    },
+    "products": {
+      "root": "services/products",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "images",
+          "format": "url",
+          "env": "IMAGE_SERVICE_BASE_URL"
+        }
+      ]
+    },
+    "chatbot": {
+      "root": "services/chatbot",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "products",
+          "format": "url",
+          "env": "PRODUCTS_API_URL"
+        },
+        {
+          "type": "service",
+          "service": "orders",
+          "format": "url",
+          "env": "ORDERS_API_URL"
+        }
+      ]
+    },
+    "images": {
+      "root": "services/images",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
+  ]
+}

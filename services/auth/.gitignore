@@ -1,0 +1,6 @@
+.venv
+firebase.json
+serviceAccountKey.json
+__pycache__
+.env
+**/client_secret.json

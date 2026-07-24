@@ -1,0 +1,24 @@
+# Auth service
+
+FastAPI service for Firebase authentication, session cookies, user profiles,
+careers, and role-based administration in UCB Commerce.
+
+This service is part of the UCB Commerce monorepo. Run the full system from
+the repository root:
+
+```bash
+docker compose up --build
+```
+
+For direct development, copy `.env.example` to `.env`, install
+`requirements.txt`, and start:
+
+```bash
+uvicorn app.main:app --reload --port 8001
+```
+
+The Docker image uses Python 3.12, installs the hash-locked
+`requirements.lock`, listens on the platform-provided `PORT`, and runs as a
+non-root user. Firebase Admin credentials and session settings must be
+provided through environment variables; no credential file is copied into
+the image.

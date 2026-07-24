@@ -1,0 +1,194 @@
+name: ucb-commerce
+
+services:
+  images:
+    build:
+      context: ./services/images
+      dockerfile: Dockerfile.vercel
+    env_file:
+      - ./services/images/.env
+    environment:
+      PORT: "8000"
+    ports:
+      - "127.0.0.1:8005:8000"
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - ucb-commerce
+
+  auth:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile.vercel
+    # The first file also provides NEXT_PUBLIC_FIREBASE_API_KEY as a local
+    # fallback. Auth-specific values in the second file take precedence.
+    env_file:
+      - ./apps/web/.env.local
+      - ./services/auth/.env
+    environment:
+      PORT: "8000"
+    ports:
+      - "127.0.0.1:8001:8000"
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - ucb-commerce
+
+  orders:
+    build:
+      context: ./services/orders
+      dockerfile: Dockerfile.vercel
+    env_file:
+      - ./services/orders/.env
+    environment:
+      PORT: "8000"
+    ports:
+      - "127.0.0.1:8002:8000"
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - ucb-commerce
+
+  products:
+    build:
+      context: ./services/products
+      dockerfile: Dockerfile.vercel
+    env_file:
+      - ./services/products/.env
+    environment:
+      PORT: "8000"
+      IMAGE_SERVICE_BASE_URL: http://images:8000
+      IMAGE_PUBLIC_BASE_PATH: /api/images
+    ports:
+      - "127.0.0.1:8003:8000"
+    init: true
+    restart: unless-stopped
+    depends_on:
+      images:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - ucb-commerce
+
+  chatbot:
+    build:
+      context: ./services/chatbot
+      dockerfile: Dockerfile.vercel
+    env_file:
+      - ./services/chatbot/.env
+    environment:
+      PORT: "8000"
+      PRODUCTS_API_URL: http://products:8000
+      ORDERS_API_URL: http://orders:8000
+    ports:
+      - "127.0.0.1:8004:8000"
+    init: true
+    restart: unless-stopped
+    depends_on:
+      products:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ucb-commerce
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.vercel
+      secrets:
+        - web_env
+    env_file:
+      - ./apps/web/.env.local
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      AUTH_API_URL: http://auth:8000
+      ORDERS_API_URL: http://orders:8000
+      PRODUCTS_API_URL: http://products:8000
+      CHATBOT_API_URL: http://chatbot:8000
+      IMAGE_SERVICE_BASE_URL: http://images:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    init: true
+    restart: unless-stopped
+    depends_on:
+      auth:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+      products:
+        condition: service_healthy
+      chatbot:
+        condition: service_healthy
+      images:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch("http://127.0.0.1:3000/api/health").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ucb-commerce
+
+networks:
+  ucb-commerce:
+    driver: bridge
+
+secrets:
+  web_env:
+    file: ./apps/web/.env.local
