@@ -1,0 +1,432 @@
+UCB Commerce
+Documento de Información Institucional base de conocimiento
+
+1. Descripción General del Sistema
+
+UCB Commerce es la plataforma oficial de la Universidad Católica Boliviana destinada a la gestión de productos, artículos institucionales y servicios ofrecidos dentro del ámbito universitario. Su propósito es facilitar a estudiantes, docentes, personal administrativo y público general el proceso de solicitud de productos de manera ordenada, centralizada y estandarizada.
+
+El sistema funciona mediante un modelo de pedidos sin pago en línea, donde los usuarios registran sus solicitudes dentro de la plataforma, y los administradores se encargan de revisar, verificar y coordinar personalmente el proceso de pago y entrega.
+
+La plataforma busca mantener control total sobre el stock real, evitar pagos duplicados o pedidos inviables, y asegurar la calidad del servicio institucional.
+
+2. Objetivos del Sistema
+
+Centralizar la venta y distribución de productos institucionales.
+
+Facilitar el proceso de solicitud para miembros de la comunidad universitaria.
+
+Mantener control interno del stock y disponibilidad de productos.
+
+Permitir un proceso transparente de revisión y aprobación de pedidos.
+
+Coordinar pagos y entregas de manera personalizada con cada usuario.
+
+Establecer un registro histórico de pedidos para fines administrativos.
+
+3. Usuarios del Sistema
+3.1. Usuario Regular
+
+Incluye:
+
+Estudiantes
+
+Docentes
+
+Personal administrativo
+
+Exalumnos
+
+Público general (si el campus lo permite)
+
+Acciones que puede realizar:
+
+Navegar productos
+
+Crear cuenta
+
+Iniciar sesión
+
+Agregar productos al carrito
+
+Registrar pedidos
+
+Revisar historial de pedidos
+
+Cancelar pedidos mientras estén pendientes
+
+3.2. Administrador
+
+Acciones que puede realizar:
+
+Visualizar todos los pedidos
+
+Cambiar estados de pedidos
+
+Contactar a usuarios
+
+Aprobar o rechazar pedidos
+
+Actualizar información de productos
+
+Modificar stock
+
+Crear nuevos productos o categorías
+
+Gestionar entregas y coordinación
+
+4. Catálogo de Productos
+
+El catálogo contempla diversas categorías definidas por la institución. Entre las más comunes se encuentran:
+
+4.1. Merchandising Institucional
+
+Poleras con logo UCB
+
+Hoodies y chalecos
+
+Gorras y accesorios
+
+Tazas y termos
+
+Stickers y pines
+
+Bolsos, mochilas y tote bags
+
+4.2. Material Académico
+
+Textos oficiales publicados por la universidad
+
+Cuadernos universitarios
+
+Guías de laboratorio
+
+Pack de materiales para ciertas carreras
+
+Libretas y planners institucionales
+
+4.3. Servicios
+
+Impresiones y fotocopias
+
+Servicios de certificaciones internas
+
+Trámites académicos especiales
+
+Servicios digitales ofrecidos por unidades académicas
+
+4.4. Insumos de Oficina o Estudio
+
+Lapiceros, marcadores, resaltadores
+
+Carpetas, archivadores, block de notas
+
+Set de oficina UCB
+
+4.5. Kits Especiales
+
+Kits de bienvenida estudiantil
+
+Kits para eventos institucionales
+
+Ediciones limitadas según festividades o actividades UCB
+
+4.6. Equivalencias comunes
+
+El sistema debe interpretar términos similares:
+
+Polera = Camiseta
+
+Hoodie = Buzo con capucha
+
+Merch = Artículos institucionales
+
+Taza = Taza UCB / Taza institucional
+
+5. Stock y Disponibilidad
+
+El stock mostrado en pantalla es referencial.
+
+La confirmación real del stock se realiza durante la revisión del pedido.
+
+El stock puede variar según campus, facultad o unidad administrativa.
+
+Algunos productos pueden tener stock limitado o ser de edición especial.
+
+Los administradores pueden actualizar cantidades según disponibilidad real.
+
+6. Funcionamiento del Carrito
+
+El carrito permite:
+
+Agregar uno o varios productos
+
+Modificar cantidades
+
+Eliminar productos
+
+Revisar detalles previos al pedido
+
+Para finalizar un carrito:
+
+El usuario debe iniciar sesión
+
+Deben respetarse las cantidades mínimas y máximas por producto
+
+El sistema genera un pedido único basado en los productos del carrito
+
+7. Sistema de Pedidos
+7.1. Cómo se registra un pedido
+
+El usuario completa su carrito.
+
+Hace clic en Generar Pedido.
+
+El sistema crea un registro con los productos seleccionados.
+
+El pedido entra al estado PENDIENTE.
+
+7.2. Estados del pedido
+PENDIENTE
+
+El usuario registró el pedido, pero aún no ha sido revisado por administradores.
+
+EN_REVISION
+
+Un administrador está validando:
+
+Stock real
+
+Información del usuario
+
+Viabilidad del pedido
+
+Puede solicitar aclaraciones si es necesario.
+
+APROBADO
+
+El administrador aceptó el pedido.
+Se coordina el pago y la entrega directamente con el usuario.
+
+RECHAZADO
+
+El pedido no puede ser procesado por razones como:
+
+Falta de stock
+
+Error en datos
+
+Cantidades no disponibles
+
+Usuario no responde
+
+Productos discontinuados
+
+CANCELADO_POR_USUARIO
+
+El usuario anuló el pedido mientras estaba pendiente o en revisión.
+
+COMPLETADO
+
+El proceso finalizó:
+
+Pago realizado (fuera de la plataforma)
+
+Producto entregado
+
+Caso cerrado
+
+8. Procesos Administrativos
+8.1. Revisión de pedidos
+
+El administrador revisa cada pedido manualmente:
+
+Verifica ítems solicitados
+
+Revisa cantidades
+
+Confirma que exista stock
+
+Determina si el pedido es procesable
+
+8.2. Contacto con el usuario
+
+El administrador contacta al usuario para:
+
+Confirmar el pedido
+
+Explicar métodos de pago disponibles
+
+Coordinar día y lugar de entrega
+
+Aclarar dudas sobre productos o cantidades
+
+Métodos de contacto:
+
+Correo electrónico
+
+WhatsApp
+
+Llamada telefónica
+
+8.3. Motivos de rechazo
+
+Algunos ejemplos:
+
+No existe stock suficiente
+
+El producto dejó de estar disponible
+
+Inconsistencias entre producto mostrado y existencias reales
+
+Error en datos del usuario
+
+El usuario no da respuesta después de varios intentos
+
+9. Pagos
+9.1. Pagos dentro de la plataforma
+
+La plataforma no procesa pagos de ningún tipo en línea.
+Esto incluye:
+
+Tarjetas de crédito
+
+Tarjetas de débito
+
+Pagos QR
+
+Transferencias bancarias automáticas
+
+Pago móvil o billeteras electrónicas
+
+Servicios de intermediación de pago
+
+9.2. Modalidad de pago
+
+Los pagos se realizan después de que el administrador apruebe el pedido y solo mediante los métodos que la universidad autorice, como:
+
+Pago en caja universitaria
+
+Depósitos bancarios
+
+Transferencias manuales verificadas
+
+Pago presencial
+
+El método exacto se comunica directamente al usuario durante el contacto.
+
+10. Entregas
+10.1. Modalidades
+
+Las entregas pueden realizarse mediante:
+
+Retiro en campus
+
+Entregas internas entre unidades UCB
+
+Puntos de retiro establecidos
+
+Entregas gestionadas por facultades (según producto)
+
+10.2. Coordinación con el usuario
+
+El administrador define con el usuario:
+
+Fecha y hora
+
+Lugar de entrega
+
+Documento requerido para retiro
+
+10.3. Requisitos de retiro
+
+Dependiendo del producto:
+
+Número de pedido
+
+Carnet de identidad
+
+Carnet de estudiante UCB
+
+Correo de confirmación
+
+10.4. Tiempos de entrega
+
+Los tiempos estimados dependen del campus y disponibilidad del personal.
+
+11. Cancelaciones y Devoluciones
+11.1. Cancelación por parte del usuario
+
+Un usuario puede cancelar un pedido cuando:
+
+El pedido está en PENDIENTE
+
+El pedido está en EN_REVISION
+
+Después de la aprobación, debe coordinar directamente con administración.
+
+11.2. Cancelación por parte de administración
+
+Se cancela cuando:
+
+No hay stock
+
+Hay errores en la solicitud
+
+El usuario no responde
+
+No es posible cumplir el pedido
+
+11.3. Devoluciones
+
+Las devoluciones dependen de la política interna de la unidad que gestiona el producto.
+
+12. Preguntas Frecuentes
+¿Cómo compro un producto?
+
+Debes agregarlo al carrito, iniciar sesión y registrar el pedido.
+
+¿Necesito pagar dentro de la plataforma?
+
+No. Los pagos se coordinan después con personal administrativo.
+
+¿Por qué mi pedido está pendiente?
+
+Porque aún no ha sido revisado por un administrador.
+
+¿Cuánto tardan en contactarme?
+
+Generalmente dentro de 24–48 horas hábiles.
+
+¿Puedo modificar mi pedido?
+
+Sí, mientras siga en estado pendiente. Si ya fue aprobado, depende del administrador.
+
+¿El stock mostrado es exacto?
+
+Es referencial. La confirmación final se hace manualmente.
+
+¿Puedo comprar si no soy estudiante?
+
+Depende del producto y del campus. Algunos permiten ventas a público general.
+
+13. Información Adicional del Sistema
+
+Cada pedido genera un número único identificador.
+
+Los administradores pueden dejar anotaciones internas sobre casos especiales.
+
+El usuario puede ver el historial de todos sus pedidos.
+
+Algunos productos pueden tener límite por usuario.
+
+Algunos servicios solo pueden ser adquiridos por miembros de la UCB.
+
+Los productos pueden variar entre campus.
+
+Ciertos artículos requieren verificación adicional (ej: certificados o trámites).
+
+Para productos digitales, el envío se realiza mediante correo electrónico oficial.
+
+14. Conclusión
+
+UCB Commerce es un sistema de pedidos diseñado para facilitar la adquisición de productos y servicios dentro del ámbito universitario, manteniendo procesos de verificación manual, coordinación directa y control total administrativo. La información contenida en este documento representa el funcionamiento completo del sistema, sus características principales, políticas, flujos y reglas internas.

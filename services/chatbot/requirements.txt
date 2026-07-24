@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+openai>=1.40.0
+groq
+supabase
+requests
+python-multipart
