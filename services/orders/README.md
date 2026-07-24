@@ -1,48 +1,61 @@
-# Orders Service - UCB Commerce
+# Orders service
 
-The transactional heart of the platform, managing the lifecycle of customer orders from cart checkout to delivery.
-
-## The Problem
-E-commerce transactions are critical. A "race condition" where two students buy the last item simultaneously must be prevented. We needed a system that guarantees data integrity and provides a clear audit trail of order states.
+FastAPI service for the UCB Commerce order lifecycle: checkout, status
+tracking, and career-scoped admin views. See the
+[root README](../../README.md) for system architecture and cross-service
+decisions.
 
 ## Architecture
+
 ```mermaid
 graph TD
-    Frontend -->|Create Order| API[FastAPI]
-    API -->|Verify Stock| Products[Products Service]
-    API -->|Transaction| DB[(Firestore)]
-    DB -->|Update Stock| Products
+    Frontend -->|Create order| API[FastAPI]
+    API -->|Re-validate stock, decrement, write order, clear cart| TX["Firestore transaction"]
+    TX --> DB[(Firestore)]
 ```
 
-## Technical Decisions
+## Key decisions
 
-### Transactional Integrity
-We implement strict checks before order creation. The service communicates with the Products Service to lock/verify stock before confirming an order. This distributed transaction pattern ensures we never oversell inventory.
+- **Checkout is one Firestore transaction, not a multi-step saga.** Stock is
+  pre-validated once outside the transaction (for a fast-fail on obviously
+  insufficient stock), then re-read and re-validated *inside* a
+  `@firestore.transactional` function alongside the stock decrement, the
+  order write, and the cart deletion (`app/routers/orders.py: create_order`).
+  Firestore transactions are serializable, so if two requests race for the
+  last unit of an item, only one commits — the other observes the updated
+  stock and fails with `409`. This guarantees no oversell without needing a
+  distributed lock or a separate reservation service.
+- **Orders follow a fixed status progression** (`pending → confirmed →
+  shipped → delivered`), enforced at the API layer so a status update can't
+  skip backward or jump stages arbitrarily.
+- **Admin visibility is career-scoped**, mirroring Products: a `platform_admin`
+  sees every order; a career `admin` sees only orders whose `career_tags`
+  intersect the careers they administer (`visible_careers_for`).
 
-### State Machine Logic
-Orders follow a strict state flow (Pending -> Confirmed -> Shipped -> Delivered). This state machine is enforced at the API level, preventing invalid transitions (e.g., moving from "Delivered" back to "Pending").
+## API surface
 
-## Features
-- **Order Creation**: Multi-item support with total calculation.
-- **Status Tracking**: Real-time updates for students.
-- **Admin Dashboard**: Career-specific order views for administrators.
+- `GET /orders/me` — the authenticated user's own orders.
+- `POST /orders` — create an order from the current cart.
+- `GET /orders`, `GET /orders/pending-count` — admin listing, career-scoped.
+- Status transition endpoints for admins (see `app/routers/orders.py`).
 
-## Tech Stack
-- **Language**: Python 3.10+
-- **Framework**: FastAPI
-- **Database**: Google Firestore
+## Configuration
 
-## Setup & Run
+Required: the `FIREBASE_*` service-account fields, `SESSION_COOKIE_NAME`.
 
-1.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+Also used: `ALLOWED_ORIGINS`, `ENABLE_FIRESTORE_PROVISIONING`,
+`SESSION_EXPIRES_HOURS`, `SESSION_COOKIE_DOMAIN`, `SESSION_COOKIE_SECURE`,
+`IMAGE_SERVICE_BASE_URL`.
 
-2.  **Configure Environment Variables:**
-    Set up `.env` with Firestore credentials.
+## Development
 
-3.  **Run Server:**
-    ```bash
-    uvicorn app.main:app --reload --port 8002
-    ```
+```bash
+python -m pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8002
+```
+
+This service does not yet have an automated test suite — the root README
+lists it as a known gap, since every other backend service does.
+
+This service is part of the UCB Commerce monorepo. Run the full system from
+the repository root with `docker compose up --build`.
