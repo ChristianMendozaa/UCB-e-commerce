@@ -1,4 +1,8 @@
 // src/lib/products.ts
+import {
+  assertOriginalImageSize,
+  ORIGINAL_IMAGE_SIZE_HEADER,
+} from "@/lib/upload-limits"
 export type Product = {
   id: string
   name: string
@@ -146,6 +150,7 @@ export async function createProductForm(input: {
   imageFile?: File | null
   convert_webp?: boolean
 }): Promise<Product> {
+  assertOriginalImageSize(input.imageFile)
   const fd = new FormData()
   fd.append("name", input.name)
   fd.append("price", String(input.price))
@@ -157,7 +162,16 @@ export async function createProductForm(input: {
   fd.append("convert_webp", String(input.convert_webp ?? true))
   if (input.imageFile) fd.append("image_file", input.imageFile)
 
-  const res = await fetch(`/api/products/form`, { method: "POST", credentials: "include", body: fd })
+  const headers = new Headers()
+  if (input.imageFile) {
+    headers.set(ORIGINAL_IMAGE_SIZE_HEADER, String(input.imageFile.size))
+  }
+  const res = await fetch(`/api/products/form`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: fd,
+  })
   if (!res.ok) throw new Error(await res.text())
   return asProduct(await res.json())
 }
@@ -188,6 +202,7 @@ export async function updateProductForm(
     convert_webp?: boolean
   },
 ): Promise<Product> {
+  assertOriginalImageSize(input.imageFile)
   const fd = new FormData()
   if (input.name !== undefined) fd.append("name", input.name)
   if (input.price !== undefined) fd.append("price", String(input.price))
@@ -199,7 +214,16 @@ export async function updateProductForm(
   fd.append("convert_webp", String(input.convert_webp ?? true))
   if (input.imageFile) fd.append("image_file", input.imageFile)
 
-  const res = await fetch(`/api/products/${id}/form`, { method: "PUT", credentials: "include", body: fd })
+  const headers = new Headers()
+  if (input.imageFile) {
+    headers.set(ORIGINAL_IMAGE_SIZE_HEADER, String(input.imageFile.size))
+  }
+  const res = await fetch(`/api/products/${id}/form`, {
+    method: "PUT",
+    credentials: "include",
+    headers,
+    body: fd,
+  })
   if (!res.ok) throw new Error(await res.text())
   return asProduct(await res.json())
 }

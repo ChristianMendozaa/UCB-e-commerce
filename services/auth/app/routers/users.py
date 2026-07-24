@@ -1,15 +1,35 @@
-from typing import List, Dict
-from app.schemas.roles import MakeAdminBody, RemoveAdminBody, MakePlatformAdminBody, RemovePlatformAdminBody
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+from typing import Dict, List
+
+from app.config import (
+    SESSION_COOKIE_DOMAIN,
+    SESSION_COOKIE_NAME,
+    SESSION_COOKIE_SECURE,
+)
+from app.core.firebase import firestore_db
+from app.deps.auth import get_current_user
+from app.schemas.roles import (
+    MakeAdminBody,
+    MakePlatformAdminBody,
+    RemoveAdminBody,
+    RemovePlatformAdminBody,
+)
+from app.schemas.user import MeResponse, UpdateProfile
+from app.services.roles_service import (
+    add_admin_for_career,
+    can_manage_career,
+    get_roles,
+    is_platform_admin,
+    make_platform_admin,
+    remove_admin_for_career,
+    remove_platform_admin,
+)
+from app.services.users_service import delete_profile, get_profile, upsert_profile
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from firebase_admin import auth as fb_auth
 
-from app.deps.auth import get_current_user
-from app.schemas.user import MeResponse, UpdateProfile
-from app.services.users_service import upsert_profile, get_profile, delete_profile
-from app.services.roles_service import get_roles, add_admin_for_career, can_manage_career, is_platform_admin, remove_admin_for_career, make_platform_admin, remove_platform_admin
-from app.core.firebase import firestore_db
-
 router = APIRouter(prefix="/users", tags=["users"])
+logger = logging.getLogger(__name__)
 
 # ====== HELPERS ======
 def _primary_role(roles: List[str]) -> str:
@@ -77,18 +97,43 @@ def update_my_profile(body: UpdateProfile, current=Depends(get_current_user)):
     return {"ok": True, "profile": profile}
 
 @router.delete("/me")
-def delete_my_account(current=Depends(get_current_user)):
+def delete_my_account(
+    response: Response,
+    current=Depends(get_current_user),
+):
     uid = current["uid"]
     try:
+        fb_auth.revoke_refresh_tokens(uid)
+    except Exception:
+        logger.warning("No se pudieron revocar los tokens antes de borrar %s.", uid)
+
+    try:
         fb_auth.delete_user(uid)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"No se pudo borrar el usuario en Auth: {e}")
+    except Exception:
+        logger.exception("No se pudo borrar el usuario %s en Firebase Auth.", uid)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No se pudo borrar la cuenta en Firebase Auth.",
+        )
     try:
         delete_profile(uid)
-        # Opcional: también podrías borrar su doc en `roles`
-        # firestore_db.collection("roles").document(uid).delete()
     except Exception:
-        pass
+        logger.exception("Falló la limpieza del perfil del usuario borrado %s.", uid)
+
+    try:
+        firestore_db.collection("roles").document(uid).delete()
+    except Exception:
+        # El usuario de Firebase ya no existe, por lo que check_revoked=True
+        # impide reutilizar la sesión aunque falle esta limpieza auxiliar.
+        logger.exception("Falló la limpieza de roles del usuario borrado %s.", uid)
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path="/",
+        domain=SESSION_COOKIE_DOMAIN,
+        secure=SESSION_COOKIE_SECURE,
+        httponly=True,
+        samesite="lax",
+    )
     return {"ok": True}
 
 # ========= NUEVOS ENDPOINTS DE ROLES =========

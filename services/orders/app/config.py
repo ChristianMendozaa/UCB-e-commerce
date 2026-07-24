@@ -5,6 +5,7 @@ from datetime import timedelta
 load_dotenv()
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+CORS_ALLOW_CREDENTIALS = "*" not in ALLOWED_ORIGINS
 
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 FIREBASE_TYPE = os.getenv("FIREBASE_TYPE", "service_account")

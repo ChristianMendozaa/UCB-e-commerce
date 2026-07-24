@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { ProductFormState } from "@/lib/products"
+import { assertOriginalImageSize } from "@/lib/upload-limits"
 import { Loader2 } from "lucide-react"
 
 type Props = {
@@ -28,6 +29,13 @@ const ProductEditModal: FC<Props> = ({
 }) => {
   const onFile = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null
+    try {
+      assertOriginalImageSize(file)
+    } catch (error) {
+      e.target.value = ""
+      window.alert(error instanceof Error ? error.message : "Imagen no válida.")
+      return
+    }
     setForm(p => ({ ...p, imageFile: file, image: file ? URL.createObjectURL(file) : p.image }))
   }
 
@@ -92,6 +100,7 @@ const ProductEditModal: FC<Props> = ({
             <Label>Imagen</Label>
             <Input type="file" accept="image/*" onChange={onFile} />
             {form.image && (<img src={form.image} alt="preview" className="h-24 w-24 mt-2 rounded object-cover" />)}
+            <p className="text-xs text-muted-foreground">Máximo 4 MiB.</p>
           </div>
         </div>
 

@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import ALLOWED_ORIGINS, CORS_ALLOW_CREDENTIALS
 from app.routers import chat
 
 # ========= APP FASTAPI =============
@@ -11,8 +13,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ucb-e-commerce.vercel.app", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -24,3 +26,8 @@ app.include_router(chat.router)
 @app.get("/")
 def root():
     return {"status": "ok", "msg": "RAG UCB Commerce listo"}
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}

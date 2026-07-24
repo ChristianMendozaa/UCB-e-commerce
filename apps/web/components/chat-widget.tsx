@@ -20,7 +20,7 @@ interface AuthUserLocal {
 }
 
 interface AgentTraceStep {
-  type: "thought" | "tool_call" | "tool_result"
+  type: "tool_call" | "tool_result"
   content?: string
   name?: string
   args?: any
@@ -31,6 +31,116 @@ interface Message {
   sender: "user" | "bot"
   text: string
   trace?: AgentTraceStep[]
+}
+
+const MAX_QUESTION_LENGTH = 2_000
+const MAX_HISTORY_MESSAGES = 20
+const MAX_HISTORY_TEXT_LENGTH = 4_000
+const MAX_STORED_MESSAGES = 100
+const STATIC_CHAT_NAVIGATION_PATHS = new Set([
+  "/",
+  "/catalog",
+  "/careers",
+  "/cart",
+  "/login",
+  "/orders",
+])
+
+function hasControlCharacters(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return codePoint < 32 || codePoint === 127
+  })
+}
+
+function decodePathSegment(value: string): string | null {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return null
+  }
+}
+
+function isSafeProductId(value: string): boolean {
+  if (!value || value !== value.trim() || value === "." || value === "..") {
+    return false
+  }
+  if (value.includes("/") || value.includes("\\") || hasControlCharacters(value)) {
+    return false
+  }
+  if (/^__.*__$/.test(value)) return false
+  return new TextEncoder().encode(value).byteLength <= 1_500
+}
+
+function safeNavigationPath(value: unknown): string | null {
+  if (typeof value !== "string" || !value || value !== value.trim()) return null
+  if (!value.startsWith("/") || value.startsWith("//")) return null
+  if (value.includes("\\") || hasControlCharacters(value)) return null
+
+  let parsed: URL
+  try {
+    parsed = new URL(value, window.location.origin)
+  } catch {
+    return null
+  }
+  if (parsed.origin !== window.location.origin) return null
+  if (parsed.search || parsed.hash || parsed.pathname !== value) return null
+
+  if (STATIC_CHAT_NAVIGATION_PATHS.has(value)) return value
+
+  if (value.startsWith("/products/")) {
+    const encodedSegment = value.slice("/products/".length)
+    if (!encodedSegment || encodedSegment.includes("/")) return null
+    const productId = decodePathSegment(encodedSegment)
+    if (productId === null || !isSafeProductId(productId)) return null
+    return `/products/${encodeURIComponent(productId)}`
+  }
+
+  if (value.startsWith("/careers/")) {
+    const encodedSegment = value.slice("/careers/".length)
+    if (!encodedSegment || encodedSegment.includes("/")) return null
+    const career = decodePathSegment(encodedSegment)
+    if (
+      career === null
+      || !career
+      || career !== career.trim()
+      || career === "."
+      || career === ".."
+      || career.includes("/")
+      || career.includes("\\")
+      || hasControlCharacters(career)
+      || new TextEncoder().encode(career).byteLength > 200
+    ) {
+      return null
+    }
+    return `/careers/${encodeURIComponent(career)}`
+  }
+
+  return null
+}
+
+function parseStoredMessages(value: string): Message[] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+
+    return parsed
+      .filter((item): item is { sender: "user" | "bot"; text: string } => (
+        typeof item === "object"
+        && item !== null
+        && ("sender" in item)
+        && (item.sender === "user" || item.sender === "bot")
+        && ("text" in item)
+        && typeof item.text === "string"
+      ))
+      .slice(-MAX_STORED_MESSAGES)
+      .map((item) => ({
+        sender: item.sender,
+        text: item.text.slice(0, MAX_HISTORY_TEXT_LENGTH),
+      }))
+  } catch {
+    return []
+  }
 }
 
 export function ChatWidget() {
@@ -51,11 +161,7 @@ export function ChatWidget() {
     // 1. Historial
     const saved = localStorage.getItem("chat_history")
     if (saved) {
-      try {
-        setMessages(JSON.parse(saved))
-      } catch (e) {
-        console.error("Error cargando historial", e)
-      }
+      setMessages(parseStoredMessages(saved))
     }
 
     // 2. Usuario (foto)
@@ -70,7 +176,10 @@ export function ChatWidget() {
 
   // Guardar historial
   useEffect(() => {
-    localStorage.setItem("chat_history", JSON.stringify(messages))
+    localStorage.setItem(
+      "chat_history",
+      JSON.stringify(messages.slice(-MAX_STORED_MESSAGES)),
+    )
     if (chatRef.current) {
       chatRef.current.scrollTop = chatRef.current.scrollHeight
     }
@@ -86,7 +195,10 @@ export function ChatWidget() {
     if (!input.trim() || loading) return
     const userText = input.trim()
 
-    setMessages((prev) => [...prev, { sender: "user", text: userText }])
+    setMessages((prev) => (
+      [...prev, { sender: "user", text: userText } as Message]
+        .slice(-MAX_STORED_MESSAGES)
+    ))
     setInput("")
     setLoading(true)
 
@@ -96,14 +208,21 @@ export function ChatWidget() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: userText,
-          history: messages.map(m => ({ sender: m.sender, text: m.text })), // Enviar solo texto e historial limpio
+          history: messages
+            .slice(-MAX_HISTORY_MESSAGES)
+            .map(m => ({
+              sender: m.sender,
+              text: m.text.slice(0, MAX_HISTORY_TEXT_LENGTH),
+            })),
           current_page: pathname
         }),
       })
 
       const data = await res.json()
-      const answer = data?.answer || "Lo siento, hubo un problema al responder."
-      const trace = data?.trace || []
+      const answer = typeof data?.answer === "string"
+        ? data.answer
+        : "Lo siento, hubo un problema al responder."
+      const trace = Array.isArray(data?.trace) ? data.trace : []
 
       // Manejo de navegación
       let displayText = answer
@@ -113,8 +232,14 @@ export function ChatWidget() {
           if (match) {
             const cmd = JSON.parse(match[1])
             if (cmd.action === "navigate") {
-              router.push(cmd.url)
-              displayText = answer.replace(match[0], "").trim() || "Navegando..."
+              const safePath = safeNavigationPath(cmd.url)
+              displayText = answer.replace(match[0], "").trim()
+              if (safePath) {
+                router.push(safePath)
+                displayText ||= "Navegando..."
+              } else {
+                displayText ||= "No pude abrir esa ruta."
+              }
             }
           }
         }
@@ -122,11 +247,17 @@ export function ChatWidget() {
         console.error("Error parseando comando", e)
       }
 
-      setMessages((prev) => [...prev, { sender: "bot", text: displayText, trace: trace }])
+      setMessages((prev) => (
+        [...prev, { sender: "bot", text: displayText, trace } as Message]
+          .slice(-MAX_STORED_MESSAGES)
+      ))
       await updateCartCount?.()
 
     } catch (e) {
-      setMessages((prev) => [...prev, { sender: "bot", text: "Error de conexión." }])
+      setMessages((prev) => (
+        [...prev, { sender: "bot", text: "Error de conexión." } as Message]
+          .slice(-MAX_STORED_MESSAGES)
+      ))
     } finally {
       setLoading(false)
     }
@@ -245,7 +376,7 @@ export function ChatWidget() {
                       )}
                     </div>
 
-                    {/* AGENT TRACE UI (Solo Bot) */}
+                    {/* Sanitized tool activity (bot only). */}
                     {m.sender === "bot" && m.trace && m.trace.length > 0 && (
                       <div className="w-full">
                         <button
@@ -253,7 +384,7 @@ export function ChatWidget() {
                           className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground hover:text-primary transition-colors px-2 py-1"
                         >
                           <BrainCircuit className="w-3 h-3" />
-                          {expandedTrace === i ? "Ocultar razonamiento" : "Ver razonamiento"}
+                          {expandedTrace === i ? "Ocultar actividad" : "Ver actividad"}
                           {expandedTrace === i ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                         </button>
 
@@ -261,15 +392,6 @@ export function ChatWidget() {
                           <div className="mt-1 ml-1 border-l-2 border-gray-200 dark:border-zinc-700 pl-3 space-y-3 py-2 animate-in slide-in-from-top-2 fade-in duration-200">
                             {m.trace.map((step, idx) => (
                               <div key={idx} className="text-xs space-y-1">
-
-                                {/* TIPO: PENSAMIENTO */}
-                                {step.type === "thought" && (
-                                  <div className="flex gap-2 text-gray-600 dark:text-gray-300">
-                                    <BrainCircuit className="w-3.5 h-3.5 shrink-0 mt-0.5 text-purple-500" />
-                                    <span className="italic">"{step.content}"</span>
-                                  </div>
-                                )}
-
                                 {/* TIPO: TOOL CALL */}
                                 {step.type === "tool_call" && (
                                   <div className="flex gap-2 text-blue-600 dark:text-blue-400 font-mono bg-blue-50 dark:bg-blue-900/20 p-1.5 rounded-md">
@@ -323,9 +445,10 @@ export function ChatWidget() {
                 <Input
                   placeholder="Escribe tu consulta..."
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => setInput(e.target.value.slice(0, MAX_QUESTION_LENGTH))}
                   onKeyDown={(e) => e.key === "Enter" && sendMessage()}
                   disabled={loading}
+                  maxLength={MAX_QUESTION_LENGTH}
                   className="pr-12 py-6 rounded-full border-gray-200 dark:border-zinc-700 focus-visible:ring-[#003366] shadow-sm bg-gray-50 dark:bg-zinc-900/50"
                 />
                 <Button

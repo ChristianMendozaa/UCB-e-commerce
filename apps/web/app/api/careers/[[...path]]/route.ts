@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getUpstreamBaseUrl } from "@/lib/server/upstreams";
+import { encodedPathSuffix } from "@/lib/server/proxy-path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const AUTH = process.env.NEXT_PUBLIC_AUTH_API_URL!;
-if (!AUTH) throw new Error("Falta NEXT_PUBLIC_AUTH_API_URL");
 
 export const GET = handler;
 export const POST = handler;
@@ -15,9 +14,19 @@ export const HEAD = handler;
 export const OPTIONS = handler;
 
 async function handler(req: NextRequest, ctx: { params: { path?: string[] } }) {
+    const authBaseUrl = getUpstreamBaseUrl("auth");
+    if (!authBaseUrl) {
+        return NextResponse.json(
+            { error: "Servicio de autenticación no configurado." },
+            { status: 503 },
+        );
+    }
     const segments = ctx.params?.path ?? [];
-    const suffix = segments.length ? `/${segments.join("/")}` : "";
-    const target = new URL(`${AUTH}/careers${suffix}`);
+    const suffix = encodedPathSuffix(segments);
+    if (suffix === null) {
+        return NextResponse.json({ error: "Ruta inválida." }, { status: 400 });
+    }
+    const target = new URL(`${authBaseUrl}/careers${suffix}`);
     target.search = req.nextUrl.search;
 
     const headers = new Headers(req.headers);

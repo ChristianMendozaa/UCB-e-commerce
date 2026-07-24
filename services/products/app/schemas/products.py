@@ -1,5 +1,5 @@
 # app/schemas/products.py
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -12,8 +12,9 @@ class ProductBase(BaseModel):
     stock: int = Field(0, ge=0)
     image: Optional[str] = ""
 
-    @validator("category", "career")
-    def strip_lower(cls, v: str):
+    @field_validator("name", "category", "career", mode="before")
+    @classmethod
+    def strip_required_text(cls, v: str):
         return v.strip()
 
 class ProductCreate(ProductBase):
@@ -27,6 +28,11 @@ class ProductUpdate(BaseModel):
     career: Optional[str] = Field(None, min_length=1, max_length=50)
     stock: Optional[int] = Field(None, ge=0)
     image: Optional[str] = None
+
+    @field_validator("name", "category", "career", mode="before")
+    @classmethod
+    def strip_required_text(cls, v: Optional[str]):
+        return v.strip() if isinstance(v, str) else v
 
 class ProductOut(ProductBase):
     id: str

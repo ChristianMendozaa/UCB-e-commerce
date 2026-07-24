@@ -1,13 +1,10 @@
 // app/api/orders/[[...path]]/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { getUpstreamBaseUrl } from "@/lib/server/upstreams";
+import { encodedPathSuffix } from "@/lib/server/proxy-path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const ORDERS = process.env.NEXT_PUBLIC_ORDERS_API_URL!;
-if (!ORDERS) {
-    throw new Error("Falta la env NEXT_PUBLIC_ORDERS_API_URL");
-}
 
 export const GET = handler;
 export const POST = handler;
@@ -18,11 +15,21 @@ export const HEAD = handler;
 export const OPTIONS = handler;
 
 async function handler(req: NextRequest, ctx: { params: { path?: string[] } }) {
+    const ordersBaseUrl = getUpstreamBaseUrl("orders");
+    if (!ordersBaseUrl) {
+        return NextResponse.json(
+            { error: "Servicio de pedidos no configurado." },
+            { status: 503 },
+        );
+    }
     const segments = ctx.params?.path ?? [];
-    const suffix = segments.length ? `/${segments.join("/")}` : "";
+    const suffix = encodedPathSuffix(segments);
+    if (suffix === null) {
+        return NextResponse.json({ error: "Ruta inválida." }, { status: 400 });
+    }
 
     // Tu backend de pedidos expone /orders/*
-    const target = new URL(`${ORDERS}/orders${suffix}`);
+    const target = new URL(`${ordersBaseUrl}/orders${suffix}`);
     target.search = req.nextUrl.search;
 
     const headers = new Headers(req.headers);

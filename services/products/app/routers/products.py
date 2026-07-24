@@ -1,9 +1,15 @@
 # app/routers/products.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form
+from pydantic import ValidationError
 from typing import Optional
 
 from app.deps.auth import get_current_user
-from app.deps.permissions import can_manage_career_or_403, visible_careers_for
+from app.deps.permissions import (
+    can_manage_career_or_403,
+    can_move_product_or_403,
+    require_platform_admin_or_403,
+    visible_careers_for,
+)
 from app.schemas.products import ProductCreate, ProductUpdate, ProductOut, ProductList
 from app.repositories import products_repo as repo
 from app.services.images import upload_image_and_get_url  # ✅ nuevo
@@ -13,46 +19,16 @@ from app.core.rag_sync import sync_product_to_rag, delete_product_from_rag
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
-# --- RUTA PÚBLICA (debe ir antes del detalle) ---
-@router.get("/public", response_model=ProductList, tags=["public"])
-def list_public_products(
-    q: Optional[str] = Query(None, description="Búsqueda simple en nombre/descripcion"),
-    category: Optional[str] = Query(None),
-    career: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[str] = Query(None, description="ISO datetime para paginación"),
-):
-    items, next_cursor = repo.list_products(
-        q=q, category=category, career=career, limit=limit, cursor_iso=cursor, restrict_to_careers=None
-    )
-    return {"items": items, "next_cursor": next_cursor}
 
-# --- LISTA AUTENTICADA ---
-@router.get("", response_model=ProductList)
-def list_products(
-    q: Optional[str] = Query(None, description="Búsqueda simple en nombre/descripcion"),
-    category: Optional[str] = Query(None),
-    career: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[str] = Query(None, description="ISO datetime para paginación"),
-    user=Depends(get_current_user),
-):
-    restrict_to = visible_careers_for(user["uid"])
-    items, next_cursor = repo.list_products(
-        q=q, category=category, career=career, limit=limit, cursor_iso=cursor,
-        restrict_to_careers=restrict_to if career is None else None,
-    )
-    return {"items": items, "next_cursor": next_cursor}
+def _validated_form_model(model_type, values):
+    try:
+        return model_type(**values)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.errors(),
+        ) from exc
 
-# --- DETALLE AUTENTICADO ---
-@router.get("/{prod_id}", response_model=ProductOut, tags=["public"])
-def get_product(prod_id: str):
-    p = repo.get_product(prod_id)
-    if not p:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
-# lo haremos en el endpoint usando el repo.
-
-router = APIRouter(prefix="/api/products", tags=["products"])
 
 # --- RUTA PÚBLICA (debe ir antes del detalle) ---
 @router.get("/public", response_model=ProductList, tags=["public"])
@@ -97,7 +73,7 @@ def get_product(prod_id: str):
 @router.post("", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
 def create_product(payload: ProductCreate, user=Depends(get_current_user)):
     can_manage_career_or_403(user["uid"], payload.career)
-    created = repo.create_product(payload.dict(), uid=user["uid"])
+    created = repo.create_product(payload.model_dump(), uid=user["uid"])
     # RAG Sync
     sync_product_to_rag(created)
     return created
@@ -117,22 +93,27 @@ async def create_product_form(
     image_file: Optional[UploadFile] = File(None),
     user=Depends(get_current_user),
 ):
-    can_manage_career_or_403(user["uid"], career)
+    product = _validated_form_model(
+        ProductCreate,
+        {
+            "name": name,
+            "description": description or "",
+            "price": price,
+            "category": category,
+            "career": career,
+            "stock": stock,
+            "image": image_url or "",
+        },
+    )
+    can_manage_career_or_403(user["uid"], product.career)
 
     # Si llega archivo → subir y obtener URL
-    final_image = image_url or ""
+    final_image = product.image or ""
     if image_file is not None:
         final_image = await upload_image_and_get_url(image_file, convert_webp=convert_webp)
 
-    payload = {
-        "name": name,
-        "description": description or "",
-        "price": price,
-        "category": category,
-        "career": career,
-        "stock": stock,
-        "image": final_image,
-    }
+    payload = product.model_dump()
+    payload["image"] = final_image
     created = repo.create_product(payload, uid=user["uid"])
     # RAG Sync
     sync_product_to_rag(created)
@@ -145,8 +126,12 @@ def update_product(prod_id: str, payload: ProductUpdate, user=Depends(get_curren
     if not current:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
     target_career = payload.career or current["career"]
-    can_manage_career_or_403(user["uid"], target_career)
-    updated = repo.update_product(prod_id, payload.dict(exclude_unset=True))
+    can_move_product_or_403(
+        user["uid"],
+        current["career"],
+        target_career,
+    )
+    updated = repo.update_product(prod_id, payload.model_dump(exclude_unset=True))
     assert updated is not None
     # RAG Sync
     sync_product_to_rag(updated)
@@ -171,23 +156,37 @@ async def update_product_form(
     if not current:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
 
-    target_career = career or current["career"]
-    can_manage_career_or_403(user["uid"], target_career)
-
-    final_image = image_url  # si mandan URL directa, la usamos
-    if image_file is not None:
-        final_image = await upload_image_and_get_url(image_file, convert_webp=convert_webp)
-
-    update_payload = {
-        "name": name,
-        "description": description,
-        "price": price,
-        "category": category,
-        "career": career,
-        "stock": stock,
-        # Solo setear 'image' si se envió url o archivo
-        **({"image": final_image} if final_image is not None else {}),
+    raw_update = {
+        key: value
+        for key, value in {
+            "name": name,
+            "description": description,
+            "price": price,
+            "category": category,
+            "career": career,
+            "stock": stock,
+            "image": image_url,
+        }.items()
+        if value is not None
     }
+    product_update = _validated_form_model(ProductUpdate, raw_update)
+    update_payload = product_update.model_dump(exclude_unset=True)
+    target_career = (
+        product_update.career
+        if product_update.career is not None
+        else current["career"]
+    )
+    can_move_product_or_403(
+        user["uid"],
+        current["career"],
+        target_career,
+    )
+
+    if image_file is not None:
+        update_payload["image"] = await upload_image_and_get_url(
+            image_file,
+            convert_webp=convert_webp,
+        )
 
     updated = repo.update_product(prod_id, update_payload)
     assert updated is not None
@@ -211,11 +210,13 @@ def delete_product(prod_id: str, user=Depends(get_current_user)):
 
 # --- FORCE SYNC (ADMIN TOOL) ---
 @router.post("/force-rag-sync", tags=["admin"])
-def force_rag_sync():
+def force_rag_sync(user=Depends(get_current_user)):
     """
     Recorre TODOS los productos y regenera sus embeddings en Supabase.
+    Requiere privilegios de platform_admin.
     Puede tardar si hay muchos productos.
     """
+    require_platform_admin_or_403(user["uid"])
     count = 0
     for product in repo.iter_all_products():
         sync_product_to_rag(product)

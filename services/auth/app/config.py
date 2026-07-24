@@ -5,6 +5,7 @@ from datetime import timedelta
 load_dotenv()
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+CORS_ALLOW_CREDENTIALS = "*" not in ALLOWED_ORIGINS
 
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 FIREBASE_TYPE = os.getenv("FIREBASE_TYPE", "service_account")
@@ -18,7 +19,10 @@ FIREBASE_AUTH_PROVIDER_X509_CERT_URL = os.getenv("FIREBASE_AUTH_PROVIDER_X509_CE
 FIREBASE_CLIENT_X509_CERT_URL = os.getenv("FIREBASE_CLIENT_X509_CERT_URL")
 FIREBASE_UNIVERSE_DOMAIN = os.getenv("FIREBASE_UNIVERSE_DOMAIN")
 
-FIREBASE_WEB_API_KEY = os.getenv("FIREBASE_WEB_API_KEY", "")
+FIREBASE_WEB_API_KEY = (
+    os.getenv("FIREBASE_WEB_API_KEY")
+    or os.getenv("NEXT_PUBLIC_FIREBASE_API_KEY", "")
+)
 ENABLE_FIRESTORE_PROVISIONING = os.getenv("ENABLE_FIRESTORE_PROVISIONING", "true").lower() == "true"
 
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "__session")

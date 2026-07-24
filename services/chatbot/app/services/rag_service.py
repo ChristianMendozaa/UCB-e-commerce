@@ -1,7 +1,7 @@
 import uuid
 from typing import List, Dict, Any
 from app.core.config import (
-    openai_client, supabase, groq_client,
+    openai_client, supabase,
     CHUNK_SIZE, CHUNK_OVERLAP, MAX_CHUNKS
 )
 

@@ -1,13 +1,10 @@
 // app/api/cart/[[...path]]/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { getUpstreamBaseUrl } from "@/lib/server/upstreams";
+import { encodedPathSuffix } from "@/lib/server/proxy-path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const PRODUCTS = process.env.NEXT_PUBLIC_PRODUCTS_API_URL!;
-if (!PRODUCTS) {
-    throw new Error("Falta la env NEXT_PUBLIC_PRODUCTS_API_URL");
-}
 
 export const GET = handler;
 export const POST = handler;
@@ -16,11 +13,21 @@ export const DELETE = handler;
 export const OPTIONS = handler;
 
 async function handler(req: NextRequest, ctx: { params: { path?: string[] } }) {
+    const productsBaseUrl = getUpstreamBaseUrl("products");
+    if (!productsBaseUrl) {
+        return NextResponse.json(
+            { error: "Servicio de productos no configurado." },
+            { status: 503 },
+        );
+    }
     const segments = ctx.params?.path ?? [];
-    const suffix = segments.length ? `/${segments.join("/")}` : "";
+    const suffix = encodedPathSuffix(segments);
+    if (suffix === null) {
+        return NextResponse.json({ error: "Ruta inválida." }, { status: 400 });
+    }
 
     // tu backend expone /api/cart/*
-    const target = new URL(`${PRODUCTS}/api/cart${suffix}`);
+    const target = new URL(`${productsBaseUrl}/api/cart${suffix}`);
     target.search = req.nextUrl.search;
 
     const headers = new Headers(req.headers);

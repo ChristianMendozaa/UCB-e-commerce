@@ -1,16 +1,16 @@
 # deps/auth.py
-from fastapi import Header, HTTPException, status, Request
-from firebase_admin import auth as fb_auth
-from typing import Optional
+import logging
+
 from app.config import ENABLE_FIRESTORE_PROVISIONING, SESSION_COOKIE_NAME
 from app.core.firebase import firestore_db
-import logging
+from fastapi import Header, HTTPException, Request, status
+from firebase_admin import auth as fb_auth
 
 logger = logging.getLogger(__name__)
 
 SKEW_SECONDS = 15  # tolerancia de reloj
 
-def _extract_bearer(authorization: Optional[str]) -> Optional[str]:
+def _extract_bearer(authorization: str | None) -> str | None:
     if not authorization:
         return None
     parts = authorization.split()
@@ -24,7 +24,7 @@ def _verify_session_with_skew(cookie: str):
     reintenta con tolerancia de reloj (SKEW_SECONDS).
     """
     try:
-        return fb_auth.verify_session_cookie(cookie, check_revoked=False)
+        return fb_auth.verify_session_cookie(cookie, check_revoked=True)
     except Exception as e:
         if "Token used too early" in str(e):
             logger.warning(
@@ -33,7 +33,7 @@ def _verify_session_with_skew(cookie: str):
             )
             return fb_auth.verify_session_cookie(
                 cookie,
-                check_revoked=False,
+                check_revoked=True,
                 clock_skew_seconds=SKEW_SECONDS,
             )
         raise
@@ -44,24 +44,28 @@ def _verify_id_token_with_skew(token: str):
     reintenta con tolerancia de reloj (SKEW_SECONDS).
     """
     try:
-        return fb_auth.verify_id_token(token)
+        return fb_auth.verify_id_token(token, check_revoked=True)
     except Exception as e:
         if "Token used too early" in str(e):
             logger.warning(
                 "verify_id_token: 'used too early', reintentando con %ss...",
                 SKEW_SECONDS,
             )
-            return fb_auth.verify_id_token(token, clock_skew_seconds=SKEW_SECONDS)
+            return fb_auth.verify_id_token(
+                token,
+                check_revoked=True,
+                clock_skew_seconds=SKEW_SECONDS,
+            )
         raise
 
-async def get_current_user(request: Request, authorization: Optional[str] = Header(None)):
+async def get_current_user(request: Request, authorization: str | None = Header(None)):
     # 1) Intentar cookie de sesión
     session_cookie = request.cookies.get(SESSION_COOKIE_NAME)
     decoded = None
     if session_cookie:
         try:
             decoded = _verify_session_with_skew(session_cookie)
-        except Exception as e:
+        except Exception:
             logger.exception("verify_session_cookie failed")
             decoded = None
 
@@ -72,9 +76,12 @@ async def get_current_user(request: Request, authorization: Optional[str] = Head
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token requerido.")
         try:
             decoded = _verify_id_token_with_skew(token)
-        except Exception as e:
+        except Exception:
             logger.exception("verify_id_token failed")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Token inválido: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido o revocado.",
+            )
 
     uid = decoded.get("uid")
     if not uid:

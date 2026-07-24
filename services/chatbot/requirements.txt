@@ -2,8 +2,7 @@ fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
-openai>=1.40.0
-groq
+openai>=1.109.0
 supabase
-requests
+httpx
 python-multipart

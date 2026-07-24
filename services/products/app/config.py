@@ -5,6 +5,7 @@ from datetime import timedelta
 load_dotenv()
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+CORS_ALLOW_CREDENTIALS = "*" not in ALLOWED_ORIGINS
 
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 FIREBASE_TYPE = os.getenv("FIREBASE_TYPE", "service_account")
@@ -29,6 +30,17 @@ SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "
 IMAGE_SERVICE_BASE_URL = os.getenv(
     "IMAGE_SERVICE_BASE_URL",
     "https://images-services-ucb-commerce.vercel.app"
-)
+).rstrip("/")
+_IMAGE_PUBLIC_BASE_PATH = os.getenv("IMAGE_PUBLIC_BASE_PATH") or "/api/images"
+IMAGE_PUBLIC_BASE_PATH = "/" + _IMAGE_PUBLIC_BASE_PATH.strip("/")
+LEGACY_IMAGE_HOSTS = {
+    host.strip().lower()
+    for host in os.getenv(
+        "LEGACY_IMAGE_HOSTS",
+        "images-services-ucb-commerce.vercel.app",
+    ).split(",")
+    if host.strip()
+}
+MAX_ORIGINAL_IMAGE_BYTES = 4 * 1024 * 1024
 
 SESSION_EXPIRES_DELTA = timedelta(hours=SESSION_EXPIRES_HOURS)

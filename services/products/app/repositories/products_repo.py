@@ -4,6 +4,7 @@ from datetime import datetime
 from google.cloud.firestore_v1.base_query import FieldFilter, Or, And, BaseCompositeFilter
 
 from app.core.firebase import firestore_db
+from app.services.image_urls import normalize_public_image_url
 
 _COLLECTION = "products"
 
@@ -14,6 +15,7 @@ def _now() -> datetime:
 def _doc_to_out(doc) -> Dict[str, Any]:
     data = doc.to_dict() or {}
     data["id"] = doc.id
+    data["image"] = normalize_public_image_url(data.get("image", ""))
     # normalizamos timestamps
     data["createdAt"] = data.get("createdAt")
     data["updatedAt"] = data.get("updatedAt")
@@ -29,7 +31,9 @@ def create_product(payload: Dict[str, Any], uid: str) -> Dict[str, Any]:
     }
     ref = firestore_db.collection(_COLLECTION).document()
     ref.set(payload)
-    return {**payload, "id": ref.id}
+    result = {**payload, "id": ref.id}
+    result["image"] = normalize_public_image_url(result.get("image", ""))
+    return result
 
 def get_product(prod_id: str) -> Optional[Dict[str, Any]]:
     doc = firestore_db.collection(_COLLECTION).document(prod_id).get()

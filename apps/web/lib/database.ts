@@ -1,7 +1,6 @@
 export interface User {
   id: string
   email: string
-  password: string
   name: string
   role: "student" | "teacher" | "admin"
   career?: string
@@ -60,7 +59,6 @@ class NoSQLDatabase {
       {
         id: "1",
         email: "admin@ucb.edu.bo",
-        password: "admin123",
         name: "Administrador UCB",
         role: "admin",
         createdAt: new Date(),
@@ -68,7 +66,6 @@ class NoSQLDatabase {
       {
         id: "2",
         email: "estudiante@ucb.edu.bo",
-        password: "student123",
         name: "Juan Pérez",
         role: "student",
         career: "Ingeniería de Sistemas",
@@ -162,8 +159,8 @@ class NoSQLDatabase {
   }
 
   // Métodos para Users
-  async findUser(email: string, password?: string): Promise<User | null> {
-    return this.users.find((user) => user.email === email && (!password || user.password === password)) || null
+  async findUser(email: string): Promise<User | null> {
+    return this.users.find((user) => user.email === email) || null
   }
 
   async createUser(userData: Omit<User, "id" | "createdAt">): Promise<User> {
@@ -312,7 +309,6 @@ export class DatabaseService {
   static createUser(userData: {
     name: string
     email: string
-    password: string
     role: "student" | "teacher" | "admin"
     career?: string
   }) {

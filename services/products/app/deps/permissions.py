@@ -35,6 +35,42 @@ def can_manage_career_or_403(uid: str, career: str):
         detail=f"No tienes permisos para gestionar productos de la carrera '{career}'.",
     )
 
+
+def can_move_product_or_403(
+    uid: str,
+    current_career: str,
+    target_career: str,
+):
+    """
+    Editing a product requires authority over its current owner career and,
+    when reassigned, over the destination career as well.
+    """
+    roles, is_platform_admin, admin_careers = _read_roles_doc(uid)
+    if is_platform_admin:
+        return
+    allowed = set(admin_careers)
+    if (
+        "admin" in roles
+        and current_career in allowed
+        and target_career in allowed
+    ):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="No tienes permisos para modificar o reasignar este producto.",
+    )
+
+
+def require_platform_admin_or_403(uid: str):
+    _, is_platform_admin, _ = _read_roles_doc(uid)
+    if is_platform_admin:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Solo platform_admin puede ejecutar esta operación.",
+    )
+
+
 def visible_careers_for(uid: str) -> List[str]:
     roles, is_platform_admin, admin_careers = _read_roles_doc(uid)
     if is_platform_admin:

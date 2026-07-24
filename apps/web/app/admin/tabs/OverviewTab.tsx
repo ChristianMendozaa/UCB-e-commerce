@@ -1,13 +1,12 @@
 "use client"
 
-import type { FC } from "react"
+import type { FC, ReactElement } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Package, ShoppingCart, Users, TrendingUp, Clock } from "lucide-react"
 import type { Order } from "@/lib/orders"
 import type { Product } from "@/lib/products"
 import { DashboardCharts } from "@/components/admin/dashboard-charts"
-import type { JSX } from "react/jsx-runtime"
 
 export type DashboardStats = {
   totalProducts: number
@@ -22,12 +21,12 @@ type Props = {
   stats: DashboardStats
   recentOrders: Order[]
   lowStockProducts: Product[]
-  getOrderStatusIcon: (s: Order["status"]) => JSX.Element
+  getOrderStatusIcon: (s: Order["status"]) => ReactElement
   getOrderStatusColor: (s: Order["status"]) => string
   getOrderStatusText: (s: Order["status"]) => string
 }
 
-const StatCard: FC<{ icon: JSX.Element; label: string; value: string | number }> = ({ icon, label, value }) => (
+const StatCard: FC<{ icon: ReactElement; label: string; value: string | number }> = ({ icon, label, value }) => (
   <Card>
     <CardContent className="p-6">
       <div className="flex items-center space-x-2">
