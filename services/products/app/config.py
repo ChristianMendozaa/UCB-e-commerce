@@ -29,23 +29,15 @@ SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "
 
 IMAGE_SERVICE_BASE_URL = os.getenv(
     "IMAGE_SERVICE_BASE_URL",
-    "https://images-services-ucb-commerce.vercel.app"
+    "http://localhost:8005"
 ).rstrip("/")
 _IMAGE_PUBLIC_BASE_PATH = os.getenv("IMAGE_PUBLIC_BASE_PATH") or "/api/images"
 IMAGE_PUBLIC_BASE_PATH = "/" + _IMAGE_PUBLIC_BASE_PATH.strip("/")
-LEGACY_IMAGE_HOSTS = {
-    host.strip().lower()
-    for host in os.getenv(
-        "LEGACY_IMAGE_HOSTS",
-        "images-services-ucb-commerce.vercel.app",
-    ).split(",")
-    if host.strip()
-}
 MAX_ORIGINAL_IMAGE_BYTES = 4 * 1024 * 1024
 
-CHATBOT_API_URL = os.getenv(
-    "CHATBOT_API_URL",
-    "http://localhost:8004"
+RAG_API_URL = os.getenv(
+    "RAG_API_URL",
+    "http://localhost:8006"
 ).rstrip("/")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "")
 

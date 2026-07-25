@@ -18,7 +18,7 @@ jobs:
       matrix:
         # `orders` has no automated test suite yet — see the root README's
         # Known limitations.
-        service: [auth, chatbot, products, images]
+        service: [auth, chatbot, products, images, rag]
     defaults:
       run:
         working-directory: services/${{ matrix.service }}

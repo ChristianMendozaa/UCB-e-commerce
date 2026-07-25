@@ -29,7 +29,7 @@ SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "
 
 IMAGE_SERVICE_BASE_URL = os.getenv(
     "IMAGE_SERVICE_BASE_URL",
-    "https://images-services-ucb-commerce.vercel.app"
-)
+    "http://localhost:8005"
+).rstrip("/")
 
 SESSION_EXPIRES_DELTA = timedelta(hours=SESSION_EXPIRES_HOURS)

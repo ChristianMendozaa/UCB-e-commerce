@@ -1,8 +1,7 @@
 import os
 
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, OpenAI
-from supabase import Client, create_client
+from openai import AsyncOpenAI
 
 load_dotenv()
 
@@ -64,8 +63,6 @@ OPENAI_CACHED_INPUT_PRICE_PER_M = _non_negative_float(
 OPENAI_OUTPUT_PRICE_PER_M = _non_negative_float("OPENAI_OUTPUT_PRICE_PER_M", 15.00)
 
 # Servicios
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 PRODUCTS_API_URL = os.getenv(
     "PRODUCTS_API_URL",
@@ -74,6 +71,10 @@ PRODUCTS_API_URL = os.getenv(
 ORDERS_API_URL = os.getenv(
     "ORDERS_API_URL",
     "http://localhost:8001",
+).rstrip("/")
+RAG_API_URL = os.getenv(
+    "RAG_API_URL",
+    "http://localhost:8006",
 ).rstrip("/")
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "__session")
 ALLOWED_ORIGINS = [
@@ -94,8 +95,6 @@ missing_variables = [
     name
     for name, value in (
         ("OPENAI_API_KEY", OPENAI_API_KEY),
-        ("SUPABASE_URL", SUPABASE_URL),
-        ("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE),
         ("INTERNAL_API_TOKEN", INTERNAL_API_TOKEN),
     )
     if not value
@@ -105,14 +104,7 @@ if missing_variables:
         "Faltan variables de entorno requeridas: " + ", ".join(missing_variables)
     )
 
-# El cliente asíncrono atiende el agente; el síncrono conserva el RAG existente.
-# Los retries del agente se controlan explícitamente en agent_service.
+# El cliente asíncrono atiende el agente. Los retries del agente se controlan
+# explícitamente en agent_service. El RAG (embeddings + Supabase) vive en el
+# servicio rag; este servicio lo consulta por HTTP vía app.services.rag_client.
 openai_async_client = AsyncOpenAI(api_key=OPENAI_API_KEY, max_retries=0)
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
-
-# Parámetros de RAG. text-embedding-3-small produce vectores de 1536 dimensiones.
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
-MAX_CHUNKS = 200
-EMBEDDING_DIM = 1536

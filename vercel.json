@@ -61,9 +61,9 @@
         },
         {
           "type": "service",
-          "service": "chatbot",
+          "service": "rag",
           "format": "url",
-          "env": "CHATBOT_API_URL"
+          "env": "RAG_API_URL"
         }
       ]
     },
@@ -83,11 +83,22 @@
           "service": "orders",
           "format": "url",
           "env": "ORDERS_API_URL"
+        },
+        {
+          "type": "service",
+          "service": "rag",
+          "format": "url",
+          "env": "RAG_API_URL"
         }
       ]
     },
     "images": {
       "root": "services/images",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel"
+    },
+    "rag": {
+      "root": "services/rag",
       "runtime": "container",
       "entrypoint": "Dockerfile.vercel"
     }

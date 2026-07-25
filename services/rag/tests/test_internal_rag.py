@@ -131,3 +131,34 @@ def test_unknown_namespace_is_rejected():
         )
 
     assert response.status_code == 422  # "careers" no está en el Literal permitido
+
+
+def test_query_endpoint_requires_internal_token():
+    with TestClient(app) as client:
+        response = client.post("/internal/rag/query", json={"query": "hola"})
+
+    assert response.status_code == 422  # header is required
+
+
+def test_query_endpoint_returns_answer(monkeypatch):
+    fake_supabase = SimpleNamespace(
+        rpc=lambda *_args, **_kwargs: SimpleNamespace(
+            execute=lambda: SimpleNamespace(data=[{"text": "Un producto de prueba"}])
+        )
+    )
+    monkeypatch.setattr(rag_service, "supabase", fake_supabase)
+    monkeypatch.setattr(
+        rag_service, "openai_client", SimpleNamespace(embeddings=FakeEmbeddings())
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/internal/rag/query",
+            json={"query": "algo", "top_k": 3},
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "Un producto de prueba" in body["answer"]
+    assert body["chunks_used"] == [{"text": "Un producto de prueba"}]

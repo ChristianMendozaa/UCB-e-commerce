@@ -1,11 +1,12 @@
 import logging
 from typing import Annotated, Literal
 
+import httpx
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.core.tools import normalize_current_page
-from app.services.rag_service import process_upload
+from app.services import rag_client
 from app.services.agent_service import run_agent
 
 router = APIRouter()
@@ -57,10 +58,12 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(413, "Archivo demasiado grande (máx 2 MB).")
 
     try:
-        result = process_upload(content)
+        result = await rag_client.upload(file.filename or "upload.txt", content)
         return result
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 400:
+            raise HTTPException(400, e.response.text)
+        raise HTTPException(500, f"Error interno: {e.response.text}")
     except Exception as e:
         raise HTTPException(500, f"Error interno: {str(e)}")
 

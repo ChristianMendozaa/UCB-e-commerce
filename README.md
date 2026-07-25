@@ -1,7 +1,7 @@
 # UCB Commerce
 
 UCB Commerce is an e-commerce platform for a university's institutional
-storefront, built as a six-service monorepo behind a Next.js BFF. Its
+storefront, built as a seven-service monorepo behind a Next.js BFF. Its
 centerpiece is a conversational shopping agent that can search products,
 manage a cart, and place orders through natural-language chat — implemented
 with the OpenAI Responses API, native tool calling, and a Supabase/pgvector
@@ -34,10 +34,10 @@ Supabase (pgvector) · OpenAI Responses API · Docker · Vercel Services
 - **Cost is measured per turn, not estimated after the fact.** Token usage is
   split into four billing classes (cache read, cache write, long-context
   tiers included) and returned as a `cost` field on every response.
-- **86 tests, no network.** Auth, cart mutation, prompt-injection, and
+- **128 tests, no network.** Auth, cart mutation, prompt-injection, and
   confirmation logic are pinned by adversarial unit tests against mocked
   OpenAI/Supabase/Firestore — nothing hits a real API in CI.
-- **Stateless, replaceable containers.** All six services are non-root,
+- **Stateless, replaceable containers.** All seven services are non-root,
   hash-locked Docker images with no durable local filesystem state; every
   byte of persistence lives in Firebase, Firestore, or Supabase.
 
@@ -61,9 +61,10 @@ graph TB
         WEB["web — Next.js BFF<br/>/api/* route handlers"]
         AUTH["auth — sessions, users, roles"]
         ORDERS["orders — order lifecycle"]
-        PRODUCTS["products — catalog, cart, RAG sync"]
-        CHATBOT["chatbot — agent loop, RAG query + write"]
+        PRODUCTS["products — catalog, cart, RAG sync trigger"]
+        CHATBOT["chatbot — agent loop, RAG query client"]
         IMAGES["images — validate, store, serve"]
+        RAG["rag — RAG index owner:<br/>embed + query + write"]
     end
 
     subgraph External["External managed services"]
@@ -79,17 +80,29 @@ graph TB
     WEB --> CHATBOT
     WEB --> IMAGES
     PRODUCTS -->|image upload| IMAGES
-    PRODUCTS -->|RAG sync, internal token auth| CHATBOT
+    PRODUCTS -->|RAG sync, internal token auth| RAG
     CHATBOT -->|cart + orders tools| PRODUCTS
     CHATBOT -->|order tool| ORDERS
+    CHATBOT -->|RAG query, internal token auth| RAG
 
     AUTH --> FIREBASE
     ORDERS --> FIREBASE
     PRODUCTS --> FIREBASE
     IMAGES --> FIREBASE
-    CHATBOT -->|chat + embeddings| OPENAI
-    CHATBOT -->|semantic search + writes| SUPABASE
+    CHATBOT -->|chat| OPENAI
+    RAG -->|embeddings| OPENAI
+    RAG -->|semantic search + writes| SUPABASE
 ```
+
+`rag` is a separate service from `chatbot` — not folded together — because
+Vercel Services rejects a project whose service-binding graph has a cycle.
+`products` needs to reach the RAG index (to sync on product writes) and
+`chatbot` needs to reach both `products` (cart/order tools) and the RAG index
+(to answer questions); if the index lived inside `chatbot`, that would close
+`products → chatbot → products`. Routing both callers to a `rag` service that
+depends on nothing keeps the graph a DAG. See the *Vercel service bindings*
+subsection under [Deploy to Vercel](#vercel-environment-variables) for the
+full binding table.
 
 ---
 
@@ -200,12 +213,13 @@ The catalog and a static institutional-knowledge document share one Supabase
 graph LR
     subgraph Write path
         PW["Product created/updated\n(services/products)"] --> POST["POST /internal/rag/documents\n(X-Internal-Token)"]
-        POST --> UUID["UUIDv5(Firestore ID)\n(services/chatbot)"]
+        POST --> UUID["UUIDv5(Firestore ID)\n(services/rag)"]
         UUID --> EMB1[Embed product text]
         EMB1 --> UP[Delete old chunks,\ninsert new chunk]
     end
     subgraph Query path
-        Q[User question] --> EMB2["Embed (text-embedding-3-small)"]
+        Q["User question\n(services/chatbot)"] --> QPOST["POST /internal/rag/query\n(X-Internal-Token)"]
+        QPOST --> EMB2["Embed (text-embedding-3-small)\n(services/rag)"]
         EMB2 --> RPC[match_rag_ucbcommerce_chunks\ncosine similarity]
         RPC --> TOP[Top 5 above 0.3 threshold]
         TOP --> WRAP[Wrapped as untrusted_data\nreturned to agent]
@@ -220,19 +234,27 @@ graph LR
   (`fix_rag_threshold.sql`).
 - **Identity mapping:** Firestore product IDs are arbitrary strings; Supabase
   requires a `uuid` primary key, so each ID is mapped through a deterministic
-  `UUIDv5` under a fixed namespace (`services/chatbot/app/services/
+  `UUIDv5` under a fixed namespace (`services/rag/app/services/
   rag_service.py: _namespace_uuid`). Re-syncing a product is idempotent
   (delete-by-`source_id`, then insert) rather than accumulating stale chunks.
 - **Ownership:** `services/products` only formats product text
   (`app/core/rag_sync.py: get_product_text_representation`) and calls
-  `chatbot`'s `/internal/rag/documents`; it holds no OpenAI or Supabase
-  credentials. `chatbot` is the sole owner of embeddings and the vector
-  store — the one external integration two services used to duplicate.
+  `rag`'s `/internal/rag/documents`; it holds no OpenAI or Supabase
+  credentials. `services/chatbot` only asks questions, through
+  `app/services/rag_client.py` calling `rag`'s `/internal/rag/query`; it holds
+  no Supabase credentials either. `rag` is the sole owner of embeddings and
+  the vector store — the one external integration the other two services
+  used to duplicate. `rag` is a separate service (not part of `chatbot`)
+  specifically so `products → rag` and `chatbot → rag` don't close a cycle
+  through a shared `chatbot` — see the diagram note in
+  [System architecture](#system-architecture).
 - **Chunking** (for the static knowledge document): 1,000 characters with a
   200-character overlap, capped at 200 chunks, with exact-duplicate removal
   and a loop guard so a pathological input can't chunk forever.
-- Query-time embedding calls run through `asyncio.to_thread` so a synchronous
-  OpenAI SDK call never blocks the agent's event loop.
+- `rag`'s query endpoint is a synchronous FastAPI route (FastAPI runs it in
+  its own threadpool), so the blocking OpenAI SDK call never stalls that
+  worker's event loop. `chatbot` reaches it over a plain async `httpx` call,
+  so a slow embedding call can't block chatbot's event loop either.
 
 ## Cost engineering
 
@@ -314,20 +336,35 @@ re-indexing idempotent without a lookup table.
 rather than through a queue. Simpler to reason about and guarantees the
 catalog and the vector index never drift apart during normal operation; the
 accepted cost is that a product create/update request now includes an HTTP
-round-trip to `chatbot` (which in turn calls OpenAI), and a transient
+round-trip to `rag` (which in turn calls OpenAI), and a transient
 failure anywhere in that chain is swallowed rather than retried (see Known
 limitations).
 
-**OpenAI and the vector store have exactly one owner (`chatbot`), reached
-over HTTP instead of duplicated per-service.** `services/products` used to
-hold its own `OPENAI_API_KEY` and Supabase credentials solely to regenerate
-embeddings on write — the same external integration reimplemented in two
-places, each able to drift (model name, chunking, credentials) independently.
-Centralizing it means `products` now depends on `chatbot` being reachable to
-keep the index fresh, so `/internal/rag/*` is the one place in this codebase
-with service-to-service auth (a shared `X-Internal-Token`) rather than bare
+**OpenAI embeddings and the vector store have exactly one owner (`rag`),
+reached over HTTP instead of duplicated per-service.** `services/products`
+used to hold its own `OPENAI_API_KEY` and Supabase credentials solely to
+regenerate embeddings on write — the same external integration reimplemented
+in two places, each able to drift (model name, chunking, credentials)
+independently. Centralizing it means `products` and `chatbot` both depend on
+`rag` being reachable to keep the index fresh (writes and queries,
+respectively), so `/internal/rag/*` is the one place in this codebase with
+service-to-service auth (a shared `X-Internal-Token`) rather than bare
 network-isolation trust — the accepted cost of a mutating endpoint crossing
 a Vercel service boundary.
+
+**`rag` is a dedicated service rather than living inside `chatbot`, purely to
+keep the Vercel service-binding graph acyclic.** `products` needs to reach
+the RAG index to sync on writes, and `chatbot` needs to reach both `products`
+(cart/order tools) and the RAG index (to answer questions). If the index
+lived inside `chatbot`, those two requirements would close the cycle
+`products → chatbot → products`, which Vercel Services rejects outright at
+deploy time (`experimentalServicesV2 declares a circular service binding`)
+with no per-service escape hatch — the binding *is* the reachability grant,
+so there's no way to point one side at a raw URL instead. Routing both
+callers to a `rag` service that itself depends on nothing keeps the graph a
+DAG. The accepted cost is a second OpenAI-key-holding surface (`chatbot` for
+chat, `rag` for embeddings) plus one more container to build, deploy, and
+bill.
 
 ---
 
@@ -345,20 +382,21 @@ a Vercel service boundary.
 | Path traversal through proxied route segments | Multi-pass percent-decoding with traversal/control-character rejection before re-encoding | `apps/web/lib/server/proxy-path.ts` |
 | Chat endpoint abuse / cost runaway | Per-IP token-bucket rate limit (12 req/60s), LRU-bounded to 10k tracked clients | `apps/web/app/api/chat/route.ts` |
 | Stored image XSS/MIME confusion on download | `default-src 'none'; sandbox`, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin` on every image response | `services/images/routers/images.py`, `apps/web/app/api/images/[id]/route.ts` |
-| Unauthenticated cross-service RAG mutation | Shared-secret `X-Internal-Token`, checked with `compare_digest`, required on every `/internal/rag/*` call from Products | `services/chatbot/app/deps/internal_auth.py` |
+| Unauthenticated cross-service RAG access | Shared-secret `X-Internal-Token`, checked with `compare_digest`, required on every `/internal/rag/*` call from Products or Chatbot | `services/rag/app/deps/internal_auth.py` |
 
 ## Testing
 
-126 tests across four Python services, all offline — OpenAI, Supabase,
+128 tests across five Python services, all offline — OpenAI, Supabase,
 Firestore, and downstream HTTP calls are mocked or monkeypatched, so the suite
 never depends on network access or live credentials.
 
 | Service | Tests | Pins |
 |---|---:|---|
-| `chatbot` | 48 | Agent loop step budget, confirmation gating, one-mutation-per-step, untrusted RAG wrapping, navigation allowlist, retry policy, chat request/response contract |
-| `products` | 14 | Career-scoped permissions, image upload error propagation, upload size limits, image URL derivation |
-| `auth` | 13 | Session cookie lifecycle, revocation-preserving clock-skew retry, account-deletion cleanup, CORS credential policy |
+| `chatbot` | 47 | Agent loop step budget, confirmation gating, one-mutation-per-step, untrusted RAG wrapping, navigation allowlist, retry policy, chat request/response contract |
 | `images` | 41 | Upload size limits, format/dimension/downscale validation, response security headers, read-path ETag/`If-None-Match`/cache-control (`fastapi.testclient`), `?w=` variant rendering and caching |
+| `products` | 18 | Career-scoped permissions, image upload error propagation, upload size limits, best-effort RAG sync HTTP calls |
+| `auth` | 13 | Session cookie lifecycle, revocation-preserving clock-skew retry, account-deletion cleanup, CORS credential policy |
+| `rag` | 9 | Legacy UUIDv5 identity mapping stability, internal-token auth on `/internal/rag/*`, chunking edge cases, embedding call shape |
 | `orders` | — | No automated tests yet (see Known limitations) |
 
 Representative adversarial tests — the ones that pin the guarantees above
@@ -391,9 +429,10 @@ apps/web/             Next.js 14 storefront and same-origin BFF
 services/auth/        Firebase authentication, users, and careers
 services/orders/      Order lifecycle
 services/products/    Catalog, inventory, and cart
-services/chatbot/     OpenAI-powered shopping assistant and Supabase RAG
+services/chatbot/     OpenAI-powered shopping assistant (agent loop)
 services/images/      Image validation and Firestore-backed image API
-compose.yaml          Local six-service topology
+services/rag/         RAG index owner: OpenAI embeddings + Supabase pgvector
+compose.yaml          Local seven-service topology
 vercel.json           Vercel Services topology
 ```
 
@@ -415,17 +454,17 @@ Stated plainly because a system with none would be suspicious:
 - **No response streaming.** The client waits for the full agent turn
   (up to 6 model round-trips) before seeing any text.
 - **RAG sync runs inline in the product write path.** Creating or updating a
-  product makes a synchronous HTTP call to `chatbot`'s
+  product makes a synchronous HTTP call to `rag`'s
   `/internal/rag/documents` (which in turn calls OpenAI) as part of that
   request, and a transient failure there is logged and swallowed rather than
   queued for retry — the catalog write still succeeds, but the index can
   silently drift until the next edit or a `POST /api/products/force-rag-sync`.
 - **The images service has no authentication of its own.** It relies entirely
   on network isolation (only reachable from `web` and `products`); it does
-  not independently verify the caller. `chatbot`'s `/internal/rag/*` endpoints
+  not independently verify the caller. `rag`'s `/internal/rag/*` endpoints
   are the one exception: they require a shared-secret `X-Internal-Token`
-  header, since `products` needs to call across a Vercel service boundary to
-  reach them.
+  header, since `products` and `chatbot` each need to call across a Vercel
+  service boundary to reach them.
 - **Retrieval is unranked and unevaluated.** Fixed-size character chunking, no
   reranking step, and no offline retrieval-quality harness — the 0.3 cosine
   threshold was tuned by observation, not a labeled eval set.
@@ -443,7 +482,7 @@ Stated plainly because a system with none would be suspicious:
 - Add a retrieval evaluation set to justify (or retune) the similarity
   threshold with data instead of observation.
 - Bring `orders` up to the same test coverage as the other services.
-- Propagate a trace ID from the BFF through chatbot → products/orders for
+- Propagate a trace ID from the BFF through chatbot → products/orders/rag for
   cross-service debugging.
 
 ---
@@ -472,6 +511,7 @@ cp services/orders/.env.example services/orders/.env
 cp services/products/.env.example services/products/.env
 cp services/chatbot/.env.example services/chatbot/.env
 cp services/images/.env.example services/images/.env
+cp services/rag/.env.example services/rag/.env
 ```
 
 Replace every `replace-with-*` and sample project value. Never commit the
@@ -500,9 +540,10 @@ services are not exposed to the local network:
 | Web | `http://localhost:3000` | `http://web:3000` | all backends |
 | Auth | `http://localhost:8001` | `http://auth:8000` | — |
 | Orders | `http://localhost:8002` | `http://orders:8000` | — |
-| Products | `http://localhost:8003` | `http://products:8000` | Images, Chatbot |
-| Chatbot | `http://localhost:8004` | `http://chatbot:8000` | Products, Orders |
+| Products | `http://localhost:8003` | `http://products:8000` | Images, Rag |
+| Chatbot | `http://localhost:8004` | `http://chatbot:8000` | Products, Orders, Rag |
 | Images | `http://localhost:8005` | `http://images:8000` | — |
+| Rag | `http://localhost:8006` | `http://rag:8000` | — |
 
 The Compose `environment` blocks deliberately override upstream URLs from
 local env files:
@@ -510,9 +551,9 @@ local env files:
 - Web: `AUTH_API_URL`, `ORDERS_API_URL`, `PRODUCTS_API_URL`,
   `CHATBOT_API_URL`, and `IMAGE_SERVICE_BASE_URL`
 - Products: `IMAGE_SERVICE_BASE_URL=http://images:8000`,
-  `IMAGE_PUBLIC_BASE_PATH=/api/images`, and `CHATBOT_API_URL=http://chatbot:8000`
-- Chatbot: `PRODUCTS_API_URL=http://products:8000` and
-  `ORDERS_API_URL=http://orders:8000`
+  `IMAGE_PUBLIC_BASE_PATH=/api/images`, and `RAG_API_URL=http://rag:8000`
+- Chatbot: `PRODUCTS_API_URL=http://products:8000`,
+  `ORDERS_API_URL=http://orders:8000`, and `RAG_API_URL=http://rag:8000`
 
 Useful commands:
 
@@ -547,8 +588,8 @@ Before deploying:
    `signInWithPopup`.
 5. Deploy from the connected Git repository or run `vercel deploy`.
 
-Only `web` has a public rewrite. Auth, Orders, Products, Chatbot, and Images
-remain private and are reachable only through declared service bindings.
+Only `web` has a public rewrite. Auth, Orders, Products, Chatbot, Images, and
+Rag remain private and are reachable only through declared service bindings.
 Vercel injects deployment-aware URLs as follows:
 
 | Caller | Target | Injected variable |
@@ -559,9 +600,20 @@ Vercel injects deployment-aware URLs as follows:
 | Web | Chatbot | `CHATBOT_API_URL` |
 | Web | Images | `IMAGE_SERVICE_BASE_URL` |
 | Products | Images | `IMAGE_SERVICE_BASE_URL` |
-| Products | Chatbot | `CHATBOT_API_URL` |
+| Products | Rag | `RAG_API_URL` |
 | Chatbot | Products | `PRODUCTS_API_URL` |
 | Chatbot | Orders | `ORDERS_API_URL` |
+| Chatbot | Rag | `RAG_API_URL` |
+
+`Rag` declares no bindings of its own — it depends on nothing else, and
+nothing points back at it from `Products` or `Chatbot`'s targets. That's
+deliberate: `Products → Chatbot` was removed in favor of `Products → Rag` and
+`Chatbot → Rag` specifically because `Products → Chatbot → Products` is a
+cycle, and Vercel Services rejects a project whose binding graph isn't a DAG
+(fails at deploy time with `experimentalServicesV2 declares a circular
+service binding`, after every image has already built). If you add a new
+cross-service call, redraw this table as a graph first and check it stays
+acyclic before touching `vercel.json`.
 
 Do not manually set binding variables in Vercel. They are runtime-only URLs
 generated for the matching Production or Preview deployment.
@@ -579,11 +631,13 @@ Set these values in the dashboard; do not upload local `.env` files:
 - Products: the `FIREBASE_*`, `SESSION_*`,
   `IMAGE_PUBLIC_BASE_PATH=/api/images`, and `INTERNAL_API_TOKEN` values
 - Chatbot: `OPENAI_API_KEY`, model/cost controls documented in its example,
-  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_API_TOKEN` (must
-  match Products' value exactly), and `SESSION_COOKIE_NAME`
+  `INTERNAL_API_TOKEN` (must match Rag's and Products' value exactly), and
+  `SESSION_COOKIE_NAME`
 - Images: the exact `FIREBASE_*` names in
   `services/images/.env.example`, plus `FIREBASE_COLLECTION`, the clamped
   `MAX_B64_BYTES`, and the image dimension limits
+- Rag: `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
+  `INTERNAL_API_TOKEN` (must match Chatbot's and Products' value exactly)
 
 For Auth, Products, and Orders, set `SESSION_COOKIE_SECURE=true` in Preview
 and Production. Keep it `false` only for plain-HTTP local development. Leave
@@ -619,22 +673,28 @@ fields, `FIREBASE_WEB_API_KEY`, `ENABLE_FIRESTORE_PROVISIONING`,
 `IMAGE_SERVICE_BASE_URL`.
 
 **`services/products`** — same `FIREBASE_*`/`SESSION_*` set, plus
-`IMAGE_SERVICE_BASE_URL`, `IMAGE_PUBLIC_BASE_PATH`, `LEGACY_IMAGE_HOSTS`
-(read-time compatibility for historical absolute image URLs),
-`CHATBOT_API_URL`, and `INTERNAL_API_TOKEN` (best-effort RAG sync calls to
-chatbot; holds no OpenAI or vector-DB credentials of its own).
+`IMAGE_SERVICE_BASE_URL`, `IMAGE_PUBLIC_BASE_PATH`, `RAG_API_URL`, and
+`INTERNAL_API_TOKEN` (best-effort RAG sync calls to `rag`; holds no
+OpenAI or vector-DB credentials of its own).
 
 **`services/chatbot`** — `OPENAI_API_KEY`, `OPENAI_CHAT_MODEL`,
 `OPENAI_REASONING_EFFORT`, `OPENAI_MAX_OUTPUT_TOKENS`,
 `OPENAI_INPUT_PRICE_PER_M`, `OPENAI_CACHED_INPUT_PRICE_PER_M`,
-`OPENAI_OUTPUT_PRICE_PER_M`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-`INTERNAL_API_TOKEN` (validates `products`' calls to `/internal/rag/*`),
-`PRODUCTS_API_URL`, `ORDERS_API_URL`, `SESSION_COOKIE_NAME`,
-`ALLOWED_ORIGINS`, `CORS_ALLOW_CREDENTIALS`.
+`OPENAI_OUTPUT_PRICE_PER_M`, `INTERNAL_API_TOKEN` (sent as `X-Internal-Token`
+on calls to `rag`'s `/internal/rag/*`), `PRODUCTS_API_URL`, `ORDERS_API_URL`,
+`RAG_API_URL`, `SESSION_COOKIE_NAME`, `ALLOWED_ORIGINS`,
+`CORS_ALLOW_CREDENTIALS`. Holds no Supabase credentials — those live only in
+`rag`.
 
 **`services/images`** — the `FIREBASE_*` service-account fields,
 `FIREBASE_COLLECTION`, `MAX_B64_BYTES` (clamped to 983,040),
 `MAX_IMAGE_WIDTH`, `MAX_IMAGE_HEIGHT`, `MAX_IMAGE_PIXELS`, `ALLOWED_ORIGINS`.
+
+**`services/rag`** — `OPENAI_API_KEY`, `SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_API_TOKEN` (validates `products`' and
+`chatbot`'s calls to `/internal/rag/*` with `compare_digest`). No `FIREBASE_*`
+or `SESSION_*` values — `rag` never sees a user session, only internal
+service-to-service calls.
 
 If `ALLOWED_ORIGINS` contains `*` on any backend service, that service forces
 `CORS_ALLOW_CREDENTIALS=false` rather than allowing wildcard-origin requests

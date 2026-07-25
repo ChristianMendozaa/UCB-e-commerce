@@ -3,11 +3,11 @@ from typing import Dict, Any
 
 import httpx
 
-from app.config import CHATBOT_API_URL, INTERNAL_API_TOKEN
+from app.config import RAG_API_URL, INTERNAL_API_TOKEN
 
 logger = logging.getLogger(__name__)
 
-_DOCUMENTS_URL = CHATBOT_API_URL + "/internal/rag/documents"
+_DOCUMENTS_URL = RAG_API_URL + "/internal/rag/documents"
 _NAMESPACE = "products"
 _TIMEOUT = 10
 
@@ -39,7 +39,7 @@ def get_product_text_representation(product: Dict[str, Any]) -> str:
 
 def sync_product_to_rag(product_data: Dict[str, Any]) -> None:
     """
-    Sincroniza un producto (creación/edición) con el RAG del chatbot.
+    Sincroniza un producto (creación/edición) con el servicio rag.
     Best-effort: un fallo aquí nunca debe impedir que la escritura del
     producto (ya persistida en Firestore) se reporte como exitosa.
     """

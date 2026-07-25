@@ -53,7 +53,7 @@ class FakeClient:
 class RagSyncBestEffortTests(unittest.TestCase):
     def test_sync_sends_formatted_text_and_auth_header(self):
         calls = []
-        request = httpx.Request("POST", "http://chatbot/internal/rag/documents")
+        request = httpx.Request("POST", "http://rag/internal/rag/documents")
         response = httpx.Response(200, request=request, json={"source_id": "u", "chunks_stored": 1})
 
         with patch(
@@ -74,7 +74,7 @@ class RagSyncBestEffortTests(unittest.TestCase):
     def test_sync_swallows_connection_failures(self):
         error = httpx.ConnectError(
             "connection refused",
-            request=httpx.Request("POST", "http://chatbot/internal/rag/documents"),
+            request=httpx.Request("POST", "http://rag/internal/rag/documents"),
         )
 
         with patch(
@@ -82,11 +82,11 @@ class RagSyncBestEffortTests(unittest.TestCase):
             lambda **kwargs: FakeClient(error=error, **kwargs),
         ):
             # No debe lanzar: la escritura del producto ya ocurrió y no
-            # debe fallar por una caída del servicio de chatbot.
+            # debe fallar por una caída del servicio rag.
             sync_product_to_rag(PRODUCT)
 
     def test_sync_swallows_upstream_error_status(self):
-        request = httpx.Request("POST", "http://chatbot/internal/rag/documents")
+        request = httpx.Request("POST", "http://rag/internal/rag/documents")
         response = httpx.Response(500, request=request, text="boom")
 
         with patch(
@@ -97,7 +97,7 @@ class RagSyncBestEffortTests(unittest.TestCase):
 
     def test_delete_sends_namespace_and_id_via_delete_method(self):
         calls = []
-        request = httpx.Request("DELETE", "http://chatbot/internal/rag/documents")
+        request = httpx.Request("DELETE", "http://rag/internal/rag/documents")
         response = httpx.Response(200, request=request, json={"source_id": "u"})
 
         with patch(
@@ -114,7 +114,7 @@ class RagSyncBestEffortTests(unittest.TestCase):
     def test_delete_swallows_connection_failures(self):
         error = httpx.ConnectError(
             "connection refused",
-            request=httpx.Request("DELETE", "http://chatbot/internal/rag/documents"),
+            request=httpx.Request("DELETE", "http://rag/internal/rag/documents"),
         )
 
         with patch(

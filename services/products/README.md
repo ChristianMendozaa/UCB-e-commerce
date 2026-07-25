@@ -1,9 +1,9 @@
 # Products service
 
 FastAPI service for the UCB Commerce catalog, cart, and inventory. It is the
-source of truth for product data, and the write path that keeps the chatbot's
-retrieval index current. See the [root README](../../README.md) for system
-architecture and cross-service decisions.
+source of truth for product data, and the write path that keeps the rag
+service's retrieval index current. See the [root README](../../README.md) for
+system architecture and cross-service decisions.
 
 ## Architecture
 
@@ -12,7 +12,8 @@ graph LR
     API[FastAPI] -->|CRUD| Firestore[(Firestore)]
     API -->|upload| Images[Images Service]
     API -->|on create/update| RAGSync[rag_sync.py]
-    RAGSync -->|embed + upsert| Supabase[(Supabase pgvector)]
+    RAGSync -->|"POST/DELETE /internal/rag/documents"| RagService[rag service]
+    RagService -->|embed + upsert| Supabase[(Supabase pgvector)]
 ```
 
 ## Key decisions
@@ -62,8 +63,7 @@ Required: the `FIREBASE_*` service-account fields, `SESSION_COOKIE_NAME`,
 
 Also used: `ALLOWED_ORIGINS`, `ENABLE_FIRESTORE_PROVISIONING`,
 `SESSION_EXPIRES_HOURS`, `SESSION_COOKIE_DOMAIN`, `SESSION_COOKIE_SECURE`,
-`IMAGE_SERVICE_BASE_URL`, `IMAGE_PUBLIC_BASE_PATH`, `LEGACY_IMAGE_HOSTS`
-(read-time compatibility for historical absolute image URLs).
+`IMAGE_SERVICE_BASE_URL`, `IMAGE_PUBLIC_BASE_PATH`.
 
 ## Development
 

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import re
 from typing import Dict, Optional
@@ -7,7 +6,7 @@ from urllib.parse import quote, unquote_to_bytes, urlsplit
 import httpx
 
 from app.core.config import ORDERS_API_URL, PRODUCTS_API_URL, SESSION_COOKIE_NAME
-from app.services.rag_service import get_answer as rag_search
+from app.services import rag_client
 
 
 _STATIC_NAVIGATION_PATHS = frozenset(
@@ -138,9 +137,7 @@ async def rag_search_tool(query: str) -> str:
         return "Error: consulta de búsqueda inválida."
 
     try:
-        # El cliente de embeddings es síncrono; se mueve a un hilo para no
-        # bloquear el event loop del servicio.
-        result = await asyncio.to_thread(rag_search, query.strip())
+        result = await rag_client.query(query.strip())
         return json.dumps(
             {
                 "untrusted_data": True,

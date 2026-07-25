@@ -79,6 +79,31 @@ services:
     networks:
       - ucb-commerce
 
+  rag:
+    build:
+      context: ./services/rag
+      dockerfile: Dockerfile.vercel
+    env_file:
+      - ./services/rag/.env
+    environment:
+      PORT: "8000"
+    ports:
+      - "127.0.0.1:8006:8000"
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - ucb-commerce
+
   products:
     build:
       context: ./services/products
@@ -89,13 +114,15 @@ services:
       PORT: "8000"
       IMAGE_SERVICE_BASE_URL: http://images:8000
       IMAGE_PUBLIC_BASE_PATH: /api/images
-      CHATBOT_API_URL: http://chatbot:8000
+      RAG_API_URL: http://rag:8000
     ports:
       - "127.0.0.1:8003:8000"
     init: true
     restart: unless-stopped
     depends_on:
       images:
+        condition: service_healthy
+      rag:
         condition: service_healthy
     healthcheck:
       test:
@@ -120,6 +147,7 @@ services:
       PORT: "8000"
       PRODUCTS_API_URL: http://products:8000
       ORDERS_API_URL: http://orders:8000
+      RAG_API_URL: http://rag:8000
     ports:
       - "127.0.0.1:8004:8000"
     init: true
@@ -128,6 +156,8 @@ services:
       products:
         condition: service_healthy
       orders:
+        condition: service_healthy
+      rag:
         condition: service_healthy
     healthcheck:
       test:

@@ -167,7 +167,7 @@ def get_answer(question: str, top_k: int = 5, source_id: str = None) -> Dict[str
 
     # Formatear el contexto
     context = "\n\n".join([f"- {m['text']}" for m in matches])
-    
+
     return {
         "answer": context if context else "No encontré información relevante en la base de conocimientos.",
         "chunks_used": matches
