@@ -33,6 +33,13 @@ async function handler(req: NextRequest, ctx: { params: { path?: string[] } }) {
     return NextResponse.json({ error: "Ruta inválida." }, { status: 400 });
   }
 
+  // The public catalog listing doesn't vary by identity (no auth dependency
+  // on the products-side handler) and never sets a cookie, so — unlike
+  // every other route this proxy handles — it's safe to let the CDN and the
+  // browser cache it briefly. Everything else stays no-store.
+  const isPublicListGet =
+    req.method === "GET" && segments.length === 1 && segments[0] === "public";
+
   // tu backend expone /api/products/*
   const target = new URL(`${productsBaseUrl}/api/products${suffix}`);
   target.search = req.nextUrl.search;
@@ -118,7 +125,18 @@ async function handler(req: NextRequest, ctx: { params: { path?: string[] } }) {
     setCookie.split(/,(?=\s*\w+=)/g).forEach((c) => res.headers.append("set-cookie", c));
   }
 
-  res.headers.set("cache-control", "no-store");
+  if (
+    isPublicListGet &&
+    upstream.status === 200 &&
+    !upstream.headers.get("set-cookie")
+  ) {
+    const cacheControl = "public, max-age=60, stale-while-revalidate=300";
+    res.headers.set("cache-control", cacheControl);
+    res.headers.set("cdn-cache-control", cacheControl);
+    res.headers.set("vercel-cdn-cache-control", cacheControl);
+  } else {
+    res.headers.set("cache-control", "no-store");
+  }
   return res;
 }
 

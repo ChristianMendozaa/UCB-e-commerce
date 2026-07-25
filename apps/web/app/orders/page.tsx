@@ -14,6 +14,7 @@ import { ordersApi } from "@/lib/orders"
 import type { Product } from "@/lib/products"
 import { productsApi } from "@/lib/products"
 import { authService } from "@/lib/auth"
+import { imageUrl } from "@/lib/image-url"
 
 interface OrderWithProducts extends Order {
   products: Array<{
@@ -228,10 +229,13 @@ export default function OrdersPage() {
                       {order.products.map((item, index) => (
                         <div key={index} className="flex items-center space-x-3 py-2">
                           <div className="w-12 h-12 bg-muted rounded-lg overflow-hidden">
-                            {/* Puedes cambiar por <Image/> si prefieres optimización */}
                             <img
-                              src={item.product.image || "/placeholder.svg"}
+                              src={imageUrl(item.product.image, 96) || "/placeholder.svg"}
                               alt={item.product.name}
+                              width={48}
+                              height={48}
+                              loading="lazy"
+                              decoding="async"
                               className="w-full h-full object-cover"
                             />
                           </div>

@@ -73,7 +73,10 @@ one, say so explicitly rather than letting it drift:
 - **Image budget stays 4 MiB original / 983,040 bytes Base64.** The Base64
   cap is derived from Firestore's 1 MiB document limit minus a 64 KiB margin
   — don't raise `MAX_B64_BYTES` past `MAX_SAFE_B64_BYTES` in
-  `services/images/config.py`.
+  `services/images/config.py`. Within that unchanged budget, originals are
+  downscaled to a `MAX_STORED_IMAGE_EDGE` (1600px) long edge and always
+  encoded as WebP before storage (`utils/utils.py: process_image`) — this
+  changes what fits inside the cap, not the cap itself.
 - **The browser only calls same-origin `/api/*`.** No component should ever
   fetch a backend service URL directly from client code.
 

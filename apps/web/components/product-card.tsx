@@ -18,9 +18,11 @@ import { addToCart as addToLocalCart } from "@/lib/cart" // ⬅️ carrito en lo
 interface ProductCardProps {
   product: Product
   onAddToCart?: () => void
+  /** Set for the first few above-the-fold cards to skip lazy-loading. */
+  priority?: boolean
 }
 
-export function ProductCard({ product, onAddToCart }: ProductCardProps) {
+export function ProductCard({ product, onAddToCart, priority = false }: ProductCardProps) {
   const [quantity, setQuantity] = useState(1)
   const { updateCartCount, optimisticAdd } = useCart()
   const [isLoading, setIsLoading] = useState(false)
@@ -76,11 +78,13 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
     <Card className="h-full flex flex-col hover:shadow-lg transition-all duration-300">
       <CardHeader className="p-0">
         <Link href={`/products/${product.id}`}>
-          <div className="relative aspect-square overflow-hidden rounded-t-lg cursor-pointer">
+          <div className="relative aspect-square overflow-hidden rounded-t-lg cursor-pointer bg-muted animate-pulse">
             <Image
               src={product.image || "/placeholder.svg"}
               alt={product.name}
               fill
+              sizes="(max-width: 768px) 100vw, (max-width: 1280px) 33vw, 25vw"
+              priority={priority}
               className="object-cover transition-transform duration-300 hover:scale-105"
             />
             <div className="absolute top-2 right-2">

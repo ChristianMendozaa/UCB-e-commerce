@@ -338,7 +338,7 @@ never depends on network access or live credentials.
 | `chatbot` | 48 | Agent loop step budget, confirmation gating, one-mutation-per-step, untrusted RAG wrapping, navigation allowlist, retry policy, chat request/response contract |
 | `products` | 14 | Career-scoped permissions, image upload error propagation, upload size limits, image URL derivation |
 | `auth` | 13 | Session cookie lifecycle, revocation-preserving clock-skew retry, account-deletion cleanup, CORS credential policy |
-| `images` | 11 | Upload size limits, format/dimension validation, response security headers |
+| `images` | 41 | Upload size limits, format/dimension/downscale validation, response security headers, read-path ETag/`If-None-Match`/cache-control (`fastapi.testclient`), `?w=` variant rendering and caching |
 | `orders` | — | No automated tests yet (see Known limitations) |
 
 Representative adversarial tests — the ones that pin the guarantees above

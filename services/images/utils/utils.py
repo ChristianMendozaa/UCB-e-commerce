@@ -14,6 +14,11 @@ SUPPORTED_IMAGE_FORMATS: Final[dict[str, tuple[str, str]]] = {
     "WEBP": ("image/webp", ".webp"),
 }
 
+_PNG_SIGNATURE: Final[bytes] = b"\x89PNG\r\n\x1a\n"
+_JPEG_SIGNATURE: Final[bytes] = b"\xff\xd8\xff"
+_RIFF_SIGNATURE: Final[bytes] = b"RIFF"
+_WEBP_SIGNATURE: Final[bytes] = b"WEBP"
+
 
 class ImageValidationError(ValueError):
     """Base error for image data that is unsafe or unsupported."""
@@ -102,12 +107,25 @@ def process_image(
     max_width: int,
     max_height: int,
     max_pixels: int,
+    max_edge: int | None = None,
 ) -> ProcessedImage:
     """
     Decode and re-encode a supported image before storage.
 
     Re-encoding strips metadata and trailing payloads. MIME type and extension
     are derived from Pillow's byte-level detection rather than upload headers.
+
+    Dimension limits (`max_width`/`max_height`/`max_pixels`) are enforced by
+    `inspect_image_bytes` before anything is decoded, so an oversized upload is
+    always rejected rather than silently shrunk. `max_edge`, if given, is a
+    *storage* optimization applied only after that validation passes: it
+    downscales already-accepted images so stored bytes stay small, it never
+    upscales, and it never changes whether an upload is accepted.
+
+    When `convert_webp` is true the image is always encoded as WebP (not just
+    as a fallback once the JPEG/PNG re-encode overflows the budget) — WebP is
+    consistently smaller for photographic product images, and every caller in
+    this codebase already passes `convert_webp=True`.
     """
     image_format = inspect_image_bytes(
         data,
@@ -117,19 +135,24 @@ def process_image(
     )
     image = _decode_normalized_image(data)
     try:
-        encoded = _encode_image(image, image_format)
-        output_format = image_format
+        if max_edge and max(image.width, image.height) > max_edge:
+            image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
 
-        if calc_b64_size(encoded) > max_b64_bytes:
-            if not convert_webp:
-                raise EncodedImageTooLargeError(
-                    "La imagen normalizada supera el límite de almacenamiento"
-                )
-            encoded = _encode_image(image, "WEBP", quality=80)
+        if convert_webp:
+            encoded = _encode_image(image, "WEBP", quality=85)
             output_format = "WEBP"
             if calc_b64_size(encoded) > max_b64_bytes:
+                encoded = _encode_image(image, "WEBP", quality=80)
+                if calc_b64_size(encoded) > max_b64_bytes:
+                    raise EncodedImageTooLargeError(
+                        "La imagen WebP supera el límite de almacenamiento"
+                    )
+        else:
+            encoded = _encode_image(image, image_format)
+            output_format = image_format
+            if calc_b64_size(encoded) > max_b64_bytes:
                 raise EncodedImageTooLargeError(
-                    "La imagen WebP supera el límite de almacenamiento"
+                    "La imagen normalizada supera el límite de almacenamiento"
                 )
     finally:
         image.close()
@@ -167,6 +190,32 @@ def trusted_image_metadata(
         max_height=max_height,
         max_pixels=max_pixels,
     )
+    content_type, _ = SUPPORTED_IMAGE_FORMATS[image_format]
+    return content_type, canonical_filename(filename, image_format)
+
+
+def sniff_image_format(data: bytes) -> str:
+    """Derive the canonical format from leading bytes only, without decoding.
+
+    Cheap read-path counterpart to `inspect_image_bytes`/`trusted_image_metadata`.
+    Still derives the format from the stored bytes, never from the stored
+    `contentType` field — it just skips the full Pillow open/verify pass,
+    which is safe here because the bytes were already fully validated by
+    `process_image` at write time and are never re-decoded on a plain
+    (non-resize) read.
+    """
+    if data.startswith(_PNG_SIGNATURE):
+        return "PNG"
+    if data.startswith(_JPEG_SIGNATURE):
+        return "JPEG"
+    if len(data) >= 12 and data[:4] == _RIFF_SIGNATURE and data[8:12] == _WEBP_SIGNATURE:
+        return "WEBP"
+    raise UnsupportedImageError("Los bytes almacenados no son JPEG, PNG ni WebP")
+
+
+def sniffed_image_metadata(data: bytes, filename: str | None) -> tuple[str, str]:
+    """Cheap read-path counterpart to `trusted_image_metadata`."""
+    image_format = sniff_image_format(data)
     content_type, _ = SUPPORTED_IMAGE_FORMATS[image_format]
     return content_type, canonical_filename(filename, image_format)
 
@@ -218,6 +267,7 @@ def _encode_image(
     image_format: str,
     *,
     quality: int = 85,
+    method: int = 6,
 ) -> bytes:
     output = BytesIO()
     if image_format == "JPEG":
@@ -231,7 +281,7 @@ def _encode_image(
     elif image_format == "PNG":
         image.save(output, format="PNG", optimize=True)
     elif image_format == "WEBP":
-        image.save(output, format="WEBP", quality=quality, method=6)
+        image.save(output, format="WEBP", quality=quality, method=method)
     else:
         raise UnsupportedImageError("Formato de imagen no permitido")
     return output.getvalue()

@@ -1,5 +1,5 @@
 # app/routers/products.py
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form, Response
 from pydantic import ValidationError
 from typing import Optional
 
@@ -33,6 +33,7 @@ def _validated_form_model(model_type, values):
 # --- RUTA PÚBLICA (debe ir antes del detalle) ---
 @router.get("/public", response_model=ProductList, tags=["public"])
 def list_public_products(
+    response: Response,
     q: Optional[str] = Query(None, description="Búsqueda simple en nombre/descripcion"),
     category: Optional[str] = Query(None),
     career: Optional[str] = Query(None),
@@ -42,6 +43,11 @@ def list_public_products(
     items, next_cursor = repo.list_products(
         q=q, category=category, career=career, limit=limit, cursor_iso=cursor, restrict_to_careers=None
     )
+    # Doesn't vary by identity and never sets a cookie, so a short cache is
+    # safe. apps/web's products proxy re-asserts this for the CDN/browser
+    # tier; setting it here too keeps the contract honest if this endpoint
+    # is ever reached some other way.
+    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
     return {"items": items, "next_cursor": next_cursor}
 
 # --- LISTA AUTENTICADA ---

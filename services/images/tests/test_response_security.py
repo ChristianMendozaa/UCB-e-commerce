@@ -12,6 +12,8 @@ sys.path.insert(0, str(SERVICE_ROOT))
 sys.modules["firebase_client"] = types.SimpleNamespace(db=None)
 
 from routers.images import (
+    _if_none_match_matches,
+    _image_etag,
     _image_response_headers,
     _validated_stored_image,
 )
@@ -58,6 +60,45 @@ class ImageResponseSecurityTests(unittest.TestCase):
         self.assertEqual(returned_raw, raw)
         self.assertEqual(content_type, "image/png")
         self.assertEqual(filename, "payload.png")
+
+
+class ImageEtagTests(unittest.TestCase):
+    def test_etag_is_stable_for_the_same_input(self):
+        self.assertEqual(_image_etag("same-b64"), _image_etag("same-b64"))
+
+    def test_etag_differs_by_width(self):
+        self.assertNotEqual(_image_etag("same-b64"), _image_etag("same-b64", 320))
+        self.assertNotEqual(_image_etag("same-b64", 96), _image_etag("same-b64", 320))
+
+    def test_etag_differs_when_stored_bytes_differ(self):
+        self.assertNotEqual(_image_etag("b64-one"), _image_etag("b64-two"))
+
+    def test_etag_is_a_quoted_strong_validator(self):
+        etag = _image_etag("some-b64")
+        self.assertTrue(etag.startswith('"'))
+        self.assertTrue(etag.endswith('"'))
+        self.assertFalse(etag.startswith("W/"))
+
+
+class IfNoneMatchTests(unittest.TestCase):
+    def test_exact_match(self):
+        self.assertTrue(_if_none_match_matches('"abc"', '"abc"'))
+
+    def test_no_match(self):
+        self.assertFalse(_if_none_match_matches('"abc"', '"def"'))
+
+    def test_wildcard_always_matches(self):
+        self.assertTrue(_if_none_match_matches("*", '"anything"'))
+
+    def test_matches_within_a_comma_separated_list(self):
+        self.assertTrue(_if_none_match_matches('"one", "two", "three"', '"two"'))
+
+    def test_tolerates_weak_validator_prefix(self):
+        self.assertTrue(_if_none_match_matches('W/"abc"', '"abc"'))
+
+    def test_missing_header_never_matches(self):
+        self.assertFalse(_if_none_match_matches(None, '"abc"'))
+        self.assertFalse(_if_none_match_matches("", '"abc"'))
 
 
 if __name__ == "__main__":

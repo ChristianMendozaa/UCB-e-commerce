@@ -186,12 +186,13 @@ export default function CartPage() {
                   <Card key={item.productId}>
                     <CardContent className="p-6">
                       <div className="flex space-x-4">
-                        <div className="relative w-20 h-20 rounded-lg overflow-hidden bg-muted">
+                        <div className="relative w-20 h-20 rounded-lg overflow-hidden bg-muted animate-pulse">
                           <Image
                             src={item.product?.image || "/placeholder.svg"}
                             alt={item.product?.name || "Producto"}
                             fill
                             className="object-cover"
+                            sizes="80px"
                           />
                         </div>
 

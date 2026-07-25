@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Package, Plus, Search, MoreHorizontal, Edit, Trash2, Eye } from "lucide-react"
 import type { Product } from "@/lib/products"
+import { imageUrl } from "@/lib/image-url"
 type Props = {
   // data
   products: Product[]
@@ -156,8 +157,12 @@ export const ProductsTab: FC<Props> = ({
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center">
                           <img
-                            src={product.image || "/placeholder.svg"}
+                            src={imageUrl(product.image, 96) || "/placeholder.svg"}
                             alt={product.name}
+                            width={40}
+                            height={40}
+                            loading="lazy"
+                            decoding="async"
                             className="w-full h-full object-cover rounded-lg"
                           />
                         </div>

@@ -21,6 +21,8 @@ from utils.utils import (
     UnsupportedImageError,
     inspect_image_bytes,
     process_image,
+    sniff_image_format,
+    sniffed_image_metadata,
 )
 
 
@@ -147,6 +149,92 @@ class ImageProcessingTests(unittest.TestCase):
                 max_height=100,
                 max_pixels=10_000,
             )
+
+    def test_downscales_long_edge_to_configured_maximum(self):
+        uploaded = make_image_bytes("PNG", size=(2400, 1200))
+
+        result = process_image(
+            uploaded,
+            original_filename="big.png",
+            convert_webp=False,
+            max_b64_bytes=200_000,
+            max_width=8192,
+            max_height=8192,
+            max_pixels=25_000_000,
+            max_edge=1600,
+        )
+
+        with Image.open(BytesIO(result.data)) as decoded:
+            self.assertEqual(decoded.size, (1600, 800))
+
+    def test_does_not_upscale_images_below_the_maximum(self):
+        uploaded = make_image_bytes("PNG", size=(50, 40))
+
+        result = process_image(
+            uploaded,
+            original_filename="small.png",
+            convert_webp=False,
+            max_b64_bytes=200_000,
+            max_width=8192,
+            max_height=8192,
+            max_pixels=25_000_000,
+            max_edge=1600,
+        )
+
+        with Image.open(BytesIO(result.data)) as decoded:
+            self.assertEqual(decoded.size, (50, 40))
+
+    def test_dimension_limits_are_enforced_before_downscaling(self):
+        # An upload that exceeds the configured limits must still be
+        # rejected outright, never silently shrunk to fit via max_edge.
+        uploaded = make_image_bytes("PNG", size=(20, 10))
+
+        with self.assertRaises(ImageDimensionsError):
+            process_image(
+                uploaded,
+                original_filename="wide.png",
+                convert_webp=False,
+                max_b64_bytes=200_000,
+                max_width=10,
+                max_height=100,
+                max_pixels=10_000,
+                max_edge=1600,
+            )
+
+    def test_convert_webp_always_produces_webp(self):
+        # convert_webp=True is no longer just a fallback for oversized
+        # re-encodes — every source format is stored as WebP.
+        for image_format in ("JPEG", "PNG", "WEBP"):
+            with self.subTest(image_format=image_format):
+                result = process_image(
+                    make_image_bytes(image_format),
+                    original_filename="product.png",
+                    convert_webp=True,
+                    max_b64_bytes=200_000,
+                    max_width=100,
+                    max_height=100,
+                    max_pixels=10_000,
+                )
+                self.assertEqual(result.content_type, "image/webp")
+                self.assertTrue(result.filename.endswith(".webp"))
+
+    def test_sniff_derives_format_from_bytes_for_all_supported_types(self):
+        for image_format, expected_mime, expected_extension in (
+            ("JPEG", "image/jpeg", ".jpg"),
+            ("PNG", "image/png", ".png"),
+            ("WEBP", "image/webp", ".webp"),
+        ):
+            with self.subTest(image_format=image_format):
+                raw = make_image_bytes(image_format)
+                self.assertEqual(sniff_image_format(raw), image_format)
+
+                content_type, filename = sniffed_image_metadata(raw, "stored.svg")
+                self.assertEqual(content_type, expected_mime)
+                self.assertTrue(filename.endswith(expected_extension))
+
+    def test_sniff_rejects_bytes_without_a_known_image_signature(self):
+        with self.assertRaises(UnsupportedImageError):
+            sniff_image_format(b"<html><script>alert(1)</script></html>")
 
     def test_firestore_base64_budget_is_clamped_with_margin(self):
         self.assertEqual(
