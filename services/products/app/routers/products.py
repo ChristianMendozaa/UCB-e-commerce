@@ -15,8 +15,6 @@ from app.schemas.products import ProductCreate, ProductUpdate, ProductOut, Produ
 from app.repositories import products_repo as repo
 from app.services.images import upload_image_and_get_url  # ✅ nuevo
 from app.core.rag_sync import sync_product_to_rag, delete_product_from_rag
-# Nota: Implementaremos la lógica de iteración aquí o en rag_sync, pero como rag_sync no ve el repo, 
-# lo haremos en el endpoint usando el repo.
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -219,13 +217,21 @@ def delete_product(prod_id: str, user=Depends(get_current_user)):
 @router.post("/force-rag-sync", tags=["admin"])
 def force_rag_sync(user=Depends(get_current_user)):
     """
-    Recorre TODOS los productos y regenera sus embeddings en Supabase.
+    Recorre todos los productos y regenera sus embeddings en Firestore.
     Requiere privilegios de platform_admin.
     Puede tardar si hay muchos productos.
     """
     require_platform_admin_or_403(user["uid"])
-    count = 0
+    attempted = 0
+    succeeded = 0
     for product in repo.iter_all_products():
-        sync_product_to_rag(product)
-        count += 1
-    return {"status": "ok", "synced_count": count}
+        attempted += 1
+        if sync_product_to_rag(product):
+            succeeded += 1
+    failed = attempted - succeeded
+    return {
+        "status": "ok" if failed == 0 else "partial",
+        "attempted": attempted,
+        "succeeded": succeeded,
+        "failed": failed,
+    }

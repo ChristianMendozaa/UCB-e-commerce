@@ -105,6 +105,6 @@ if missing_variables:
     )
 
 # El cliente asíncrono atiende el agente. Los retries del agente se controlan
-# explícitamente en agent_service. El RAG (embeddings + Supabase) vive en el
+# explícitamente en agent_service. El RAG (embeddings + Firestore) vive en el
 # servicio rag; este servicio lo consulta por HTTP vía app.services.rag_client.
 openai_async_client = AsyncOpenAI(api_key=OPENAI_API_KEY, max_retries=0)

@@ -13,7 +13,7 @@ graph LR
     API -->|upload| Images[Images Service]
     API -->|on create/update| RAGSync[rag_sync.py]
     RAGSync -->|"POST/DELETE /internal/rag/documents"| RagService[rag service]
-    RagService -->|embed + upsert| Supabase[(Supabase pgvector)]
+    RagService -->|embed + vector upsert| Firestore[(Firestore)]
 ```
 
 ## Key decisions
@@ -23,9 +23,9 @@ graph LR
   document schema avoids a sparse, ever-growing set of nullable relational
   columns.
 - **RAG sync runs inline on the write path**, not through a queue: a product
-  create/update calls `sync_product_to_rag`, which deletes any existing
-  chunks for that product and inserts a fresh one, keyed by a deterministic
-  `UUIDv5` derived from the Firestore ID (`app/core/rag_sync.py`). This keeps
+  create/update calls `sync_product_to_rag` after persisting the product.
+  RAG reads that Firestore document and atomically replaces deterministic
+  chunk documents. This keeps
   the catalog and the vector index from drifting under normal operation; a
   transient embedding failure is logged and swallowed rather than retried
   (documented as a known limitation in the root README).
@@ -58,12 +58,12 @@ cannot both succeed. See `services/orders/app/routers/orders.py: create_order`.
 
 ## Configuration
 
-Required: the `FIREBASE_*` service-account fields, `SESSION_COOKIE_NAME`,
-`OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+Required: the `FIREBASE_*` service-account fields, `SESSION_COOKIE_NAME`, and
+`INTERNAL_API_TOKEN`.
 
 Also used: `ALLOWED_ORIGINS`, `ENABLE_FIRESTORE_PROVISIONING`,
 `SESSION_EXPIRES_HOURS`, `SESSION_COOKIE_DOMAIN`, `SESSION_COOKIE_SECURE`,
-`IMAGE_SERVICE_BASE_URL`, `IMAGE_PUBLIC_BASE_PATH`.
+`IMAGE_SERVICE_BASE_URL`, `IMAGE_PUBLIC_BASE_PATH`, and `RAG_API_URL`.
 
 ## Development
 
@@ -73,7 +73,7 @@ uvicorn app.main:app --reload --port 8003
 pytest
 ```
 
-14 tests covering career-scoped permissions, image upload error propagation,
+18 tests covering career-scoped permissions, image upload error propagation,
 upload size limits, and image URL derivation — all against mocked
 Firestore/HTTP, no live credentials required.
 

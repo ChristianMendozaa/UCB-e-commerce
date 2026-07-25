@@ -23,7 +23,7 @@ def test_embeddings_keep_model_and_dimension(monkeypatch):
     embedding = rag_service.embed_text("producto")
 
     assert captured == {
-        "model": "text-embedding-3-small",
+        "model": config.EMBEDDING_MODEL,
         "input": "producto",
     }
     assert config.EMBEDDING_DIM == 1536

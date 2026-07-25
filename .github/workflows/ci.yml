@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
 
-# No secrets, no deploy step, no network calls to OpenAI/Supabase/Firebase.
+# No secrets, no deploy step, no network calls to OpenAI/Firebase.
 # Each Python service tests against mocked external dependencies (see each
 # service's tests/conftest.py); the web job only builds, it does not deploy.
 

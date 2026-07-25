@@ -2,7 +2,7 @@
 
 FastAPI service for the UCB Commerce conversational shopping agent. It runs a
 bounded tool-calling loop against the OpenAI Responses API and a
-Supabase/pgvector retrieval index. See the [root README](../../README.md) for
+Firestore Vector Search retrieval index. See the [root README](../../README.md) for
 the full system architecture, the agent's confirmation model, and the
 security rationale — this file covers the service in isolation.
 
@@ -12,7 +12,7 @@ security rationale — this file covers the service in isolation.
 graph LR
     Chat["POST /chat"] --> Loop[Agent loop\nstore=False, ≤6 steps]
     Loop -->|tool calls| Tools[core/tools.py]
-    Tools -->|rag_search| RAG[Supabase pgvector]
+    Tools -->|rag_search| RAG[Private RAG service]
     Tools -->|cart/order tools| Products[Products Service]
     Tools -->|create_order| Orders[Orders Service]
     Loop --> OpenAI[[OpenAI Responses API]]
@@ -86,7 +86,7 @@ login navigation command rather than a raw error.
 
 ## Configuration
 
-Required: `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+Required: `OPENAI_API_KEY` and `INTERNAL_API_TOKEN`.
 
 Optional (defaults shown): `OPENAI_CHAT_MODEL` (`gpt-5.6-terra`),
 `OPENAI_REASONING_EFFORT` (`low`), `OPENAI_MAX_OUTPUT_TOKENS` (`1500`),
@@ -106,7 +106,7 @@ uvicorn app.main:app --reload --port 8004
 pytest
 ```
 
-48 tests, fully offline — OpenAI, Supabase, Products, and Orders are all
+47 tests, fully offline — OpenAI, RAG, Products, and Orders are all
 mocked. Representative cases: `test_only_one_mutating_tool_executes_per_model_step`,
 `test_bound_confirmation_is_consumed_after_one_mutation`,
 `test_rag_results_are_marked_as_untrusted_data`,

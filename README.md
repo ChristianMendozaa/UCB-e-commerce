@@ -4,8 +4,8 @@ UCB Commerce is an e-commerce platform for a university's institutional
 storefront, built as a seven-service monorepo behind a Next.js BFF. Its
 centerpiece is a conversational shopping agent that can search products,
 manage a cart, and place orders through natural-language chat — implemented
-with the OpenAI Responses API, native tool calling, and a Supabase/pgvector
-retrieval index over the catalog.
+with the OpenAI Responses API, native tool calling, and Firestore Vector
+Search over the catalog.
 
 The interesting engineering problem is not "call an LLM." It's that the agent
 holds real write access to a stranger's cart and order history, consumes
@@ -13,8 +13,8 @@ retrieved text that a user could poison, and runs in a stateless request/reply
 loop with no server-side conversation memory. Every mechanism below exists to
 answer one question: **what stops the model from acting on its own?**
 
-**Stack:** Next.js 14 (App Router) · FastAPI · Firebase Auth/Firestore ·
-Supabase (pgvector) · OpenAI Responses API · Docker · Vercel Services
+**Stack:** Next.js 14 (App Router) · FastAPI · Firebase Auth/Firestore Vector
+Search · OpenAI Responses API · Docker · Vercel Services
 
 ---
 
@@ -34,12 +34,12 @@ Supabase (pgvector) · OpenAI Responses API · Docker · Vercel Services
 - **Cost is measured per turn, not estimated after the fact.** Token usage is
   split into four billing classes (cache read, cache write, long-context
   tiers included) and returned as a `cost` field on every response.
-- **128 tests, no network.** Auth, cart mutation, prompt-injection, and
+- **132 tests, no network.** Auth, cart mutation, prompt-injection, and
   confirmation logic are pinned by adversarial unit tests against mocked
-  OpenAI/Supabase/Firestore — nothing hits a real API in CI.
+  OpenAI/Firestore — nothing hits a real API in CI.
 - **Stateless, replaceable containers.** All seven services are non-root,
   hash-locked Docker images with no durable local filesystem state; every
-  byte of persistence lives in Firebase, Firestore, or Supabase.
+  byte of persistence lives in Firebase or Firestore.
 
 ---
 
@@ -69,7 +69,6 @@ graph TB
 
     subgraph External["External managed services"]
         FIREBASE[(Firebase Auth + Firestore)]
-        SUPABASE[(Supabase / pgvector)]
         OPENAI[[OpenAI Responses + Embeddings]]
     end
 
@@ -91,7 +90,7 @@ graph TB
     IMAGES --> FIREBASE
     CHATBOT -->|chat| OPENAI
     RAG -->|embeddings| OPENAI
-    RAG -->|semantic search + writes| SUPABASE
+    RAG -->|source reads + vector search/writes| FIREBASE
 ```
 
 `rag` is a separate service from `chatbot` — not folded together — because
@@ -206,49 +205,48 @@ These properties are pinned by tests, not just described: see
 
 ## Retrieval
 
-The catalog and a static institutional-knowledge document share one Supabase
-`pgvector` table, queried through a single SQL function.
+The catalog and persisted institutional documents share a derived
+`rag_chunks` collection backed by Firestore Vector Search.
 
 ```mermaid
 graph LR
     subgraph Write path
         PW["Product created/updated\n(services/products)"] --> POST["POST /internal/rag/documents\n(X-Internal-Token)"]
-        POST --> UUID["UUIDv5(Firestore ID)\n(services/rag)"]
-        UUID --> EMB1[Embed product text]
-        EMB1 --> UP[Delete old chunks,\ninsert new chunk]
+        POST --> READ["Read products/{id}\nfrom Firestore"]
+        READ --> EMB1[Format, chunk, embed]
+        EMB1 --> UP["Atomic replacement\nin rag_chunks"]
     end
     subgraph Query path
         Q["User question\n(services/chatbot)"] --> QPOST["POST /internal/rag/query\n(X-Internal-Token)"]
         QPOST --> EMB2["Embed (text-embedding-3-small)\n(services/rag)"]
-        EMB2 --> RPC[match_rag_ucbcommerce_chunks\ncosine similarity]
-        RPC --> TOP[Top 5 above 0.3 threshold]
+        EMB2 --> RPC[Firestore find_nearest\ncosine distance]
+        RPC --> TOP[Top 5 within distance 0.7]
         TOP --> WRAP[Wrapped as untrusted_data\nreturned to agent]
     end
-    UP -.->|shared table| RPC
+    UP -.->|vector index| RPC
 ```
 
 - **Embeddings:** `text-embedding-3-small`, 1536 dimensions.
-- **Index:** HNSW over `vector_cosine_ops` (`setup_rag_db.sql`).
-- **Similarity threshold:** 0.3 — lowered from an initial 0.5 after tuning
-  found too many relevant products were being filtered out
-  (`fix_rag_threshold.sql`).
-- **Identity mapping:** Firestore product IDs are arbitrary strings; Supabase
-  requires a `uuid` primary key, so each ID is mapped through a deterministic
-  `UUIDv5` under a fixed namespace (`services/rag/app/services/
-  rag_service.py: _namespace_uuid`). Re-syncing a product is idempotent
-  (delete-by-`source_id`, then insert) rather than accumulating stale chunks.
-- **Ownership:** `services/products` only formats product text
-  (`app/core/rag_sync.py: get_product_text_representation`) and calls
-  `rag`'s `/internal/rag/documents`; it holds no OpenAI or Supabase
-  credentials. `services/chatbot` only asks questions, through
-  `app/services/rag_client.py` calling `rag`'s `/internal/rag/query`; it holds
-  no Supabase credentials either. `rag` is the sole owner of embeddings and
+- **Index:** a committed 1536-dimensional flat vector index over
+  `rag_chunks.embedding` (`firestore.indexes.json`).
+- **Similarity threshold:** cosine distance at most 0.7, equivalent to the
+  previous cosine-similarity threshold of 0.3.
+- **Identity mapping:** chunk document IDs are deterministic SHA-256 hashes of
+  namespace, raw Firestore source ID, and chunk index. Re-syncing atomically
+  replaces current chunks instead of accumulating stale data.
+- **Ownership:** `services/products` only sends a product ID to
+  `rag`'s `/internal/rag/documents`; `rag` reads the product from Firestore,
+  formats it, and owns all embedding/vector operations.
+  `services/chatbot` only asks questions through
+  `app/services/rag_client.py`. `rag` is the sole owner of embeddings and
   the vector store — the one external integration the other two services
   used to duplicate. `rag` is a separate service (not part of `chatbot`)
   specifically so `products → rag` and `chatbot → rag` don't close a cycle
   through a shared `chatbot` — see the diagram note in
   [System architecture](#system-architecture).
-- **Chunking** (for the static knowledge document): 1,000 characters with a
+- **Persisted text sources:** uploads are stored in `rag_sources` as bounded
+  ordered segments, so their embeddings can also be rebuilt from Firestore.
+- **Chunking:** 1,000 characters with a
   200-character overlap, capped at 200 chunks, with exact-duplicate removal
   and a loop guard so a pathological input can't chunk forever.
 - `rag`'s query endpoint is a synchronous FastAPI route (FastAPI runs it in
@@ -327,10 +325,9 @@ locations from environment (Compose DNS names locally, Vercel service
 bindings in production) rather than accepting a caller-supplied host, which
 removes an entire class of SSRF-via-configuration bugs.
 
-**Deterministic UUIDv5 mapping between Firestore string IDs and Supabase UUID
-keys**, rather than storing a second generated ID. One less field to keep in
-sync, and re-deriving the mapping from the Firestore ID alone makes RAG
-re-indexing idempotent without a lookup table.
+**Deterministic SHA-256 chunk IDs derived from the Firestore source ID**,
+rather than storing a second generated identity. Re-deriving each ID makes
+RAG re-indexing idempotent without a lookup table.
 
 **Product writes synchronize RAG embeddings inline, in the request path**,
 rather than through a queue. Simpler to reason about and guarantees the
@@ -342,7 +339,7 @@ limitations).
 
 **OpenAI embeddings and the vector store have exactly one owner (`rag`),
 reached over HTTP instead of duplicated per-service.** `services/products`
-used to hold its own `OPENAI_API_KEY` and Supabase credentials solely to
+used to hold its own `OPENAI_API_KEY` and vector-store credentials solely to
 regenerate embeddings on write — the same external integration reimplemented
 in two places, each able to drift (model name, chunking, credentials)
 independently. Centralizing it means `products` and `chatbot` both depend on
@@ -386,7 +383,7 @@ bill.
 
 ## Testing
 
-128 tests across five Python services, all offline — OpenAI, Supabase,
+132 tests across five Python services, all offline — OpenAI,
 Firestore, and downstream HTTP calls are mocked or monkeypatched, so the suite
 never depends on network access or live credentials.
 
@@ -396,7 +393,7 @@ never depends on network access or live credentials.
 | `images` | 41 | Upload size limits, format/dimension/downscale validation, response security headers, read-path ETag/`If-None-Match`/cache-control (`fastapi.testclient`), `?w=` variant rendering and caching |
 | `products` | 18 | Career-scoped permissions, image upload error propagation, upload size limits, best-effort RAG sync HTTP calls |
 | `auth` | 13 | Session cookie lifecycle, revocation-preserving clock-skew retry, account-deletion cleanup, CORS credential policy |
-| `rag` | 9 | Legacy UUIDv5 identity mapping stability, internal-token auth on `/internal/rag/*`, chunking edge cases, embedding call shape |
+| `rag` | 13 | Firestore vector writes/queries, source persistence, atomic replacement, rebuild safety, internal-token auth, chunking and embedding shape |
 | `orders` | — | No automated tests yet (see Known limitations) |
 
 Representative adversarial tests — the ones that pin the guarantees above
@@ -431,7 +428,7 @@ services/orders/      Order lifecycle
 services/products/    Catalog, inventory, and cart
 services/chatbot/     OpenAI-powered shopping assistant (agent loop)
 services/images/      Image validation and Firestore-backed image API
-services/rag/         RAG index owner: OpenAI embeddings + Supabase pgvector
+services/rag/         RAG index owner: OpenAI embeddings + Firestore vectors
 compose.yaml          Local seven-service topology
 vercel.json           Vercel Services topology
 ```
@@ -441,7 +438,7 @@ Corepack, pnpm, and Next.js standalone output. Python images use Python 3.12
 from hash-locked `requirements.lock` files. All runtime processes run as
 non-root users and listen on the platform-provided `PORT`. No container
 persists durable state to its local filesystem — everything lives in
-Firebase/Firestore, Supabase, or OpenAI.
+Firebase/Firestore or OpenAI.
 
 ## Known limitations
 
@@ -465,9 +462,9 @@ Stated plainly because a system with none would be suspicious:
   are the one exception: they require a shared-secret `X-Internal-Token`
   header, since `products` and `chatbot` each need to call across a Vercel
   service boundary to reach them.
-- **Retrieval is unranked and unevaluated.** Fixed-size character chunking, no
-  reranking step, and no offline retrieval-quality harness — the 0.3 cosine
-  threshold was tuned by observation, not a labeled eval set.
+- **Retrieval has no reranking or evaluation harness.** Fixed-size character
+  chunking and the 0.7 cosine-distance threshold were tuned by observation,
+  not a labeled eval set.
 - **No distributed tracing.** Cost and step counts are logged per request;
   there's no cross-service trace ID connecting a chat turn to the Products/
   Orders calls it triggered.
@@ -494,7 +491,6 @@ Stated plainly because a system with none would be suspicious:
 
 - Docker Engine with Docker Compose v2 and BuildKit
 - A Firebase project and service-account credentials
-- A Supabase project
 - An OpenAI API key
 
 Node.js and Python are not required on the host for the Compose workflow.
@@ -522,7 +518,40 @@ passes `apps/web/.env.local` to the web build through the optional BuildKit
 secret `web_env`; the file is mounted only for `pnpm build` and is never copied
 into an image layer. The same file is also the first `env_file` for Auth so it
 can use `NEXT_PUBLIC_FIREBASE_API_KEY` as a local fallback; values in
-`services/auth/.env` take precedence.
+`services/auth/.env` take precedence. Locally, Rag similarly reads Firebase
+service-account fields from `services/products/.env`, followed by its own
+`services/rag/.env`; Vercel must receive the same `FIREBASE_*` fields directly
+on the Rag service.
+
+### Provision the vector index and rebuild it
+
+`firestore.indexes.json` contains the 1536-dimensional vector index required
+by `rag_chunks.embedding`. Before its first deployment, export any indexes
+that already exist in the target project and merge them into the committed
+file; deploying an incomplete file can remove unrelated manual indexes.
+
+```bash
+firebase firestore:indexes --project <firebase-project-id>
+firebase deploy --only firestore:indexes --project <firebase-project-id>
+```
+
+Wait for the vector index to report `READY`, then inspect and rebuild the
+derived collection. Both commands read `services/rag/.env`; the first one
+does not generate embeddings or write data.
+
+```bash
+docker compose run --rm --no-deps rag \
+  python scripts/rebuild_index.py --dry-run \
+  --seed-upload seeds/ucb-commerce-rag.txt
+
+docker compose run --rm --no-deps rag \
+  python scripts/rebuild_index.py --prune \
+  --seed-upload seeds/ucb-commerce-rag.txt
+```
+
+The rebuild reads every product and stored text source from Firestore,
+reports individual failures, skips pruning if any source fails, and is safe
+to rerun.
 
 ### Run it
 
@@ -636,7 +665,7 @@ Set these values in the dashboard; do not upload local `.env` files:
 - Images: the exact `FIREBASE_*` names in
   `services/images/.env.example`, plus `FIREBASE_COLLECTION`, the clamped
   `MAX_B64_BYTES`, and the image dimension limits
-- Rag: `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
+- Rag: `OPENAI_API_KEY`, the `FIREBASE_*` service-account fields, and
   `INTERNAL_API_TOKEN` (must match Chatbot's and Products' value exactly)
 
 For Auth, Products, and Orders, set `SESSION_COOKIE_SECURE=true` in Preview
@@ -646,7 +675,7 @@ only when all callers intentionally share a custom parent domain.
 
 Vercel containers scale to zero and have an ephemeral filesystem. Do not
 write sessions, uploads, databases, or other durable state inside a container.
-Keep those in Firebase/Firestore, object storage, Supabase, or another backing
+Keep those in Firebase/Firestore, object storage, or another backing
 service.
 
 </details>
@@ -683,18 +712,16 @@ OpenAI or vector-DB credentials of its own).
 `OPENAI_OUTPUT_PRICE_PER_M`, `INTERNAL_API_TOKEN` (sent as `X-Internal-Token`
 on calls to `rag`'s `/internal/rag/*`), `PRODUCTS_API_URL`, `ORDERS_API_URL`,
 `RAG_API_URL`, `SESSION_COOKIE_NAME`, `ALLOWED_ORIGINS`,
-`CORS_ALLOW_CREDENTIALS`. Holds no Supabase credentials — those live only in
-`rag`.
+`CORS_ALLOW_CREDENTIALS`. Holds no embedding or vector-store credentials.
 
 **`services/images`** — the `FIREBASE_*` service-account fields,
 `FIREBASE_COLLECTION`, `MAX_B64_BYTES` (clamped to 983,040),
 `MAX_IMAGE_WIDTH`, `MAX_IMAGE_HEIGHT`, `MAX_IMAGE_PIXELS`, `ALLOWED_ORIGINS`.
 
-**`services/rag`** — `OPENAI_API_KEY`, `SUPABASE_URL`,
-`SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_API_TOKEN` (validates `products`' and
-`chatbot`'s calls to `/internal/rag/*` with `compare_digest`). No `FIREBASE_*`
-or `SESSION_*` values — `rag` never sees a user session, only internal
-service-to-service calls.
+**`services/rag`** — `OPENAI_API_KEY`, the `FIREBASE_*` service-account
+fields, and `INTERNAL_API_TOKEN` (validates `products`' and `chatbot`'s calls
+to `/internal/rag/*` with `compare_digest`). It has no `SESSION_*` values:
+`rag` never sees a user session, only internal service-to-service calls.
 
 If `ALLOWED_ORIGINS` contains `*` on any backend service, that service forces
 `CORS_ALLOW_CREDENTIALS=false` rather than allowing wildcard-origin requests

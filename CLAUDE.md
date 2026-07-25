@@ -15,15 +15,15 @@ is meant to be reachable from the browser directly.
 - `products` — catalog, cart, inventory; calls `rag` to sync embeddings on write.
 - `orders` — order lifecycle; transactional stock decrement.
 - `chatbot` — the agent: OpenAI Responses API tool-calling loop; calls `rag`
-  for retrieval instead of embedding/querying Supabase itself.
+  for retrieval instead of owning embeddings or vector persistence itself.
 - `images` — validates/re-encodes/stores images as Base64 in Firestore.
-- `rag` — owns the RAG index: OpenAI embeddings + Supabase pgvector reads and
-  writes, behind an internal-token-authenticated API. Exists as its own
+- `rag` — owns the RAG index: OpenAI embeddings + Firestore Vector Search,
+  behind an internal-token-authenticated API. Exists as its own
   service (not folded into `chatbot`) specifically so that `products → rag`
   and `chatbot → rag` don't form a cycle in Vercel's service-binding graph —
   see the *Vercel service bindings* gotcha below.
 
-External: Firebase Auth/Firestore, Supabase (pgvector), OpenAI.
+External: Firebase Auth/Firestore Vector Search and OpenAI.
 
 ## Commands
 
@@ -112,7 +112,7 @@ one, say so explicitly rather than letting it drift:
 | Tool implementations, confirmation regex, navigation allowlist | `services/chatbot/app/core/tools.py` |
 | System prompt / tool schemas | `services/chatbot/app/core/tools.py` (`SYSTEM_PROMPT`, `TOOLS_SCHEMA`) |
 | RAG query (chat-time) and RAG write/embedding (`index_document`, `delete_document`) | `services/rag/app/services/rag_service.py`, exposed via `services/rag/app/routers/rag.py`; `chatbot` calls it over HTTP through `services/chatbot/app/services/rag_client.py` |
-| RAG sync trigger (product write-time) | `services/products/app/core/rag_sync.py` — formats product text and calls the `rag` service's `/internal/rag/documents` over HTTP; holds no OpenAI/vector-DB credentials itself |
+| RAG sync trigger (product write-time) | `services/products/app/core/rag_sync.py` — sends a product ID to `rag`'s `/internal/rag/documents`; `rag` reads and formats the Firestore product |
 | Internal service-to-service auth (shared token) | `services/rag/app/deps/internal_auth.py` — validated by `rag`; sent by `products` and `chatbot` |
 | Cart / cart→order transaction | `services/products/app/repositories/cart_repo.py`, `services/orders/app/routers/orders.py` |
 | Career-scoped RBAC | `services/*/app/deps/permissions.py` |
@@ -125,13 +125,12 @@ one, say so explicitly rather than letting it drift:
 
 - `apps/web/package.json` still has `"name": "my-v0-project"` — cosmetic,
   left over from scaffolding; harmless but don't be surprised by it.
-- Firestore product/document IDs are arbitrary case-sensitive strings; the
-  Supabase RAG table needs `uuid` keys, so IDs are mapped through a
-  deterministic UUIDv5 (`services/rag/app/services/rag_service.py:
-  _namespace_uuid`, seed `"ucb-commerce-products"`). Don't introduce a
-  second, independently-generated UUID for the same product, and don't
-  change the seed without a full `force-rag-sync` — it would orphan every
-  row already indexed.
+- `rag_chunks` document IDs are deterministic SHA-256 hashes of namespace,
+  source ID, and chunk index. Keep that identity stable; changing it requires
+  running `scripts/rebuild_index.py --prune` to remove orphan chunks.
+- Vector indexes are committed in root `firestore.indexes.json`. Export and
+  merge existing production indexes before deploying that file; never
+  overwrite unrelated console-managed indexes blindly.
 - `services/images` has no auth of its own — it trusts that only `web` and
   `products` can reach it over the private network. Don't expose its port
   publicly without adding auth first.
@@ -152,12 +151,12 @@ one, say so explicitly rather than letting it drift:
 - `OPENAI_CHAT_MODEL` is env-configurable (`services/chatbot/app/core/config.py`);
   don't hardcode a model name in new code.
 - CI (`.github/workflows/ci.yml`) runs each Python service's tests plus a
-  `pnpm build` for web — no network calls to OpenAI/Supabase/Firebase, no
+  `pnpm build` for web — no network calls to OpenAI/Firebase, no
   deploy step, no secrets.
 
 ## Tests
 
-- Never let a test hit a real OpenAI/Supabase/Firebase endpoint. Follow the
+- Never let a test hit a real OpenAI/Firebase endpoint. Follow the
   existing `conftest.py` pattern: stub `app.core.firebase` before import,
   set test-only env vars (see `services/auth/tests/conftest.py` and
   `services/chatbot/tests/conftest.py`).

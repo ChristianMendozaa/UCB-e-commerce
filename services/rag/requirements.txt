@@ -3,6 +3,7 @@ uvicorn[standard]
 python-dotenv
 pydantic
 openai>=1.109.0
-supabase
+firebase-admin
+google-cloud-firestore
 httpx
 python-multipart

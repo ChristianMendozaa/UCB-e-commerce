@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.deps.internal_auth import require_internal_token
-from app.services.rag_service import delete_document, get_answer, index_document, process_upload
+from app.services.rag_service import (
+    SourceNotFoundError,
+    delete_document,
+    get_answer,
+    index_document,
+    process_upload,
+)
 
 router = APIRouter(
     prefix="/internal/rag",
@@ -18,10 +24,6 @@ SourceId = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=200),
 ]
-DocumentText = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=20_000),
-]
 QueryText = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000),
@@ -33,7 +35,6 @@ class IndexDocumentRequest(BaseModel):
 
     namespace: Namespace
     source_id: SourceId
-    text: DocumentText
 
 
 class DeleteDocumentRequest(BaseModel):
@@ -53,7 +54,9 @@ class QueryRequest(BaseModel):
 @router.post("/documents")
 def upsert_document(payload: IndexDocumentRequest):
     try:
-        return index_document(payload.namespace, payload.source_id, payload.text)
+        return index_document(payload.namespace, payload.source_id)
+    except SourceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
@@ -87,7 +90,7 @@ async def upload_document(file: UploadFile = File(...)):
     if len(content) > 2_000_000:
         raise HTTPException(413, "Archivo demasiado grande (máx 2 MB).")
     try:
-        return process_upload(content)
+        return process_upload(file.filename or "upload.txt", content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:

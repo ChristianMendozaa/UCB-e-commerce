@@ -83,7 +83,11 @@ services:
     build:
       context: ./services/rag
       dockerfile: Dockerfile.vercel
+    # Products already carries the same Firebase service-account fields for
+    # local development. Rag-specific values in the second file take
+    # precedence, while Vercel receives its own FIREBASE_* variables.
     env_file:
+      - ./services/products/.env
       - ./services/rag/.env
     environment:
       PORT: "8000"

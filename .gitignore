@@ -16,6 +16,7 @@ serviceAccountKey.json
 firebase.json
 **/serviceAccountKey.json
 **/firebase.json
+!/firebase.json
 **/client_secret.json
 *.pem
 *.key
@@ -55,3 +56,5 @@ __pycache__/
 .DS_Store
 coverage/
 htmlcov/
+.vercel
+.env*
