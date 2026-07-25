@@ -58,6 +58,12 @@
           "service": "images",
           "format": "url",
           "env": "IMAGE_SERVICE_BASE_URL"
+        },
+        {
+          "type": "service",
+          "service": "chatbot",
+          "format": "url",
+          "env": "CHATBOT_API_URL"
         }
       ]
     },

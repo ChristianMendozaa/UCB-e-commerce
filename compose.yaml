@@ -89,6 +89,7 @@ services:
       PORT: "8000"
       IMAGE_SERVICE_BASE_URL: http://images:8000
       IMAGE_PUBLIC_BASE_PATH: /api/images
+      CHATBOT_API_URL: http://chatbot:8000
     ports:
       - "127.0.0.1:8003:8000"
     init: true

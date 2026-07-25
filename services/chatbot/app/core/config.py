@@ -66,6 +66,7 @@ OPENAI_OUTPUT_PRICE_PER_M = _non_negative_float("OPENAI_OUTPUT_PRICE_PER_M", 15.
 # Servicios
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 PRODUCTS_API_URL = os.getenv(
     "PRODUCTS_API_URL",
     "http://localhost:8000",
@@ -95,6 +96,7 @@ missing_variables = [
         ("OPENAI_API_KEY", OPENAI_API_KEY),
         ("SUPABASE_URL", SUPABASE_URL),
         ("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE),
+        ("INTERNAL_API_TOKEN", INTERNAL_API_TOKEN),
     )
     if not value
 ]

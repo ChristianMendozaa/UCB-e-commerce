@@ -105,8 +105,9 @@ one, say so explicitly rather than letting it drift:
 | Agent loop, step budget, retry policy | `services/chatbot/app/services/agent_service.py` |
 | Tool implementations, confirmation regex, navigation allowlist | `services/chatbot/app/core/tools.py` |
 | System prompt / tool schemas | `services/chatbot/app/core/tools.py` (`SYSTEM_PROMPT`, `TOOLS_SCHEMA`) |
-| RAG query (chat-time) | `services/chatbot/app/services/rag_service.py` |
-| RAG sync (product write-time) | `services/products/app/core/rag_sync.py` |
+| RAG query (chat-time) and RAG write/embedding (`index_document`, `delete_document`) | `services/chatbot/app/services/rag_service.py`, exposed internally via `services/chatbot/app/routers/internal_rag.py` |
+| RAG sync trigger (product write-time) | `services/products/app/core/rag_sync.py` — formats product text and calls chatbot's `/internal/rag/documents` over HTTP; holds no OpenAI/vector-DB credentials itself |
+| Internal service-to-service auth (shared token) | `services/chatbot/app/deps/internal_auth.py` |
 | Cart / cart→order transaction | `services/products/app/repositories/cart_repo.py`, `services/orders/app/routers/orders.py` |
 | Career-scoped RBAC | `services/*/app/deps/permissions.py` |
 | Session cookie lifecycle | `services/auth/app/routers/auth.py`, `services/*/app/deps/auth.py` |
@@ -120,11 +121,18 @@ one, say so explicitly rather than letting it drift:
   left over from scaffolding; harmless but don't be surprised by it.
 - Firestore product/document IDs are arbitrary case-sensitive strings; the
   Supabase RAG table needs `uuid` keys, so IDs are mapped through a
-  deterministic UUIDv5 (`rag_sync.py: get_deterministic_uuid`). Don't
-  introduce a second, independently-generated UUID for the same product.
+  deterministic UUIDv5 (`services/chatbot/app/services/rag_service.py:
+  _namespace_uuid`, seed `"ucb-commerce-products"`). Don't introduce a
+  second, independently-generated UUID for the same product, and don't
+  change the seed without a full `force-rag-sync` — it would orphan every
+  row already indexed.
 - `services/images` has no auth of its own — it trusts that only `web` and
   `products` can reach it over the private network. Don't expose its port
   publicly without adding auth first.
+- `services/chatbot`'s `/internal/rag/*` endpoints require an
+  `INTERNAL_API_TOKEN` shared with `services/products` — both `.env` files
+  must hold the exact same value or product writes will silently fail RAG
+  sync (401, swallowed as a best-effort warning).
 - Local Compose host ports: web 3000, auth 8001, orders 8002, products 8003,
   chatbot 8004, images 8005 — all bound to `127.0.0.1` only.
 - `OPENAI_CHAT_MODEL` is env-configurable (`services/chatbot/app/core/config.py`);

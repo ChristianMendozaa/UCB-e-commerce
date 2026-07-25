@@ -1,5 +1,6 @@
 # app/routers/products.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form, Response
+from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 from typing import Optional
 
@@ -122,7 +123,7 @@ async def create_product_form(
     payload["image"] = final_image
     created = repo.create_product(payload, uid=user["uid"])
     # RAG Sync
-    sync_product_to_rag(created)
+    await run_in_threadpool(sync_product_to_rag, created)
     return created
 
 # --- ACTUALIZAR JSON (ya lo tenías) ---
@@ -197,7 +198,7 @@ async def update_product_form(
     updated = repo.update_product(prod_id, update_payload)
     assert updated is not None
     # RAG Sync
-    sync_product_to_rag(updated)
+    await run_in_threadpool(sync_product_to_rag, updated)
     return updated
 
 # DELETE /api/products/{id}

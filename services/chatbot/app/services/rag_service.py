@@ -5,6 +5,22 @@ from app.core.config import (
     CHUNK_SIZE, CHUNK_OVERLAP, MAX_CHUNKS
 )
 
+# Semillas conocidas para el mapeo determinista source_id -> UUIDv5.
+# "products" reproduce exactamente el namespace que products/app/core/rag_sync.py
+# usaba antes de que la sincronización RAG se centralizara acá: cambiar la semilla
+# huerfanaría todas las filas ya indexadas en rag_ucbcommerce_chunks.
+_NAMESPACE_SEEDS = {
+    "products": "ucb-commerce-products",
+}
+
+
+def _namespace_uuid(namespace: str, source_id: str) -> str:
+    seed = _NAMESPACE_SEEDS.get(namespace)
+    if seed is None:
+        raise ValueError(f"Namespace RAG desconocido: {namespace}")
+    namespace_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, seed)
+    return str(uuid.uuid5(namespace_uuid, source_id))
+
 def chunk_text(text: str) -> List[str]:
     """
     Divide el texto en chunks con solapamiento, evitando duplicados
@@ -72,6 +88,40 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     )
     # La API devuelve los embeddings en el mismo orden del input
     return [item.embedding for item in response.data]
+
+def index_document(namespace: str, source_id: str, text: str) -> Dict[str, Any]:
+    """
+    Indexa (o reindexa) un documento externo en el RAG.
+    Estrategia: borrar chunks anteriores de ese source_id e insertar los nuevos.
+    """
+    doc_uuid = _namespace_uuid(namespace, source_id)
+
+    supabase.table("rag_ucbcommerce_chunks").delete().eq("source_id", doc_uuid).execute()
+
+    chunks = chunk_text(text)
+    if not chunks:
+        return {"source_id": doc_uuid, "chunks_stored": 0}
+
+    embeddings = embed_texts(chunks)
+    rows = [
+        {
+            "source_id": doc_uuid,
+            "chunk_index": idx,
+            "text": chunk,
+            "embedding": emb,
+        }
+        for idx, (chunk, emb) in enumerate(zip(chunks, embeddings))
+    ]
+
+    supabase.table("rag_ucbcommerce_chunks").insert(rows).execute()
+    return {"source_id": doc_uuid, "chunks_stored": len(rows)}
+
+
+def delete_document(namespace: str, source_id: str) -> Dict[str, Any]:
+    doc_uuid = _namespace_uuid(namespace, source_id)
+    supabase.table("rag_ucbcommerce_chunks").delete().eq("source_id", doc_uuid).execute()
+    return {"source_id": doc_uuid}
+
 
 def process_upload(content: bytes) -> Dict[str, Any]:
     try:

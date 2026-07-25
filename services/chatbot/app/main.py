@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import ALLOWED_ORIGINS, CORS_ALLOW_CREDENTIALS
-from app.routers import chat
+from app.routers import chat, internal_rag
 
 # ========= APP FASTAPI =============
 
@@ -20,6 +20,7 @@ app.add_middleware(
 )
 
 app.include_router(chat.router)
+app.include_router(internal_rag.router)
 
 # ========= ROOT ===============
 

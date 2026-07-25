@@ -62,7 +62,7 @@ graph TB
         AUTH["auth — sessions, users, roles"]
         ORDERS["orders — order lifecycle"]
         PRODUCTS["products — catalog, cart, RAG sync"]
-        CHATBOT["chatbot — agent loop, RAG query"]
+        CHATBOT["chatbot — agent loop, RAG query + write"]
         IMAGES["images — validate, store, serve"]
     end
 
@@ -79,16 +79,16 @@ graph TB
     WEB --> CHATBOT
     WEB --> IMAGES
     PRODUCTS -->|image upload| IMAGES
+    PRODUCTS -->|RAG sync, internal token auth| CHATBOT
     CHATBOT -->|cart + orders tools| PRODUCTS
     CHATBOT -->|order tool| ORDERS
 
     AUTH --> FIREBASE
     ORDERS --> FIREBASE
     PRODUCTS --> FIREBASE
-    PRODUCTS -->|sync embeddings| SUPABASE
     IMAGES --> FIREBASE
     CHATBOT -->|chat + embeddings| OPENAI
-    CHATBOT -->|semantic search| SUPABASE
+    CHATBOT -->|semantic search + writes| SUPABASE
 ```
 
 ---
@@ -199,7 +199,8 @@ The catalog and a static institutional-knowledge document share one Supabase
 ```mermaid
 graph LR
     subgraph Write path
-        PW[Product created/updated] --> UUID["UUIDv5(Firestore ID)"]
+        PW["Product created/updated\n(services/products)"] --> POST["POST /internal/rag/documents\n(X-Internal-Token)"]
+        POST --> UUID["UUIDv5(Firestore ID)\n(services/chatbot)"]
         UUID --> EMB1[Embed product text]
         EMB1 --> UP[Delete old chunks,\ninsert new chunk]
     end
@@ -219,8 +220,14 @@ graph LR
   (`fix_rag_threshold.sql`).
 - **Identity mapping:** Firestore product IDs are arbitrary strings; Supabase
   requires a `uuid` primary key, so each ID is mapped through a deterministic
-  `UUIDv5` under a fixed namespace. Re-syncing a product is idempotent
+  `UUIDv5` under a fixed namespace (`services/chatbot/app/services/
+  rag_service.py: _namespace_uuid`). Re-syncing a product is idempotent
   (delete-by-`source_id`, then insert) rather than accumulating stale chunks.
+- **Ownership:** `services/products` only formats product text
+  (`app/core/rag_sync.py: get_product_text_representation`) and calls
+  `chatbot`'s `/internal/rag/documents`; it holds no OpenAI or Supabase
+  credentials. `chatbot` is the sole owner of embeddings and the vector
+  store — the one external integration two services used to duplicate.
 - **Chunking** (for the static knowledge document): 1,000 characters with a
   200-character overlap, capped at 200 chunks, with exact-duplicate removal
   and a loop guard so a pathological input can't chunk forever.
@@ -306,9 +313,21 @@ re-indexing idempotent without a lookup table.
 **Product writes synchronize RAG embeddings inline, in the request path**,
 rather than through a queue. Simpler to reason about and guarantees the
 catalog and the vector index never drift apart during normal operation; the
-accepted cost is that a product create/update request now includes an OpenAI
-embedding call, and a transient Supabase/OpenAI failure there is swallowed
-rather than retried (see Known limitations).
+accepted cost is that a product create/update request now includes an HTTP
+round-trip to `chatbot` (which in turn calls OpenAI), and a transient
+failure anywhere in that chain is swallowed rather than retried (see Known
+limitations).
+
+**OpenAI and the vector store have exactly one owner (`chatbot`), reached
+over HTTP instead of duplicated per-service.** `services/products` used to
+hold its own `OPENAI_API_KEY` and Supabase credentials solely to regenerate
+embeddings on write — the same external integration reimplemented in two
+places, each able to drift (model name, chunking, credentials) independently.
+Centralizing it means `products` now depends on `chatbot` being reachable to
+keep the index fresh, so `/internal/rag/*` is the one place in this codebase
+with service-to-service auth (a shared `X-Internal-Token`) rather than bare
+network-isolation trust — the accepted cost of a mutating endpoint crossing
+a Vercel service boundary.
 
 ---
 
@@ -326,10 +345,11 @@ rather than retried (see Known limitations).
 | Path traversal through proxied route segments | Multi-pass percent-decoding with traversal/control-character rejection before re-encoding | `apps/web/lib/server/proxy-path.ts` |
 | Chat endpoint abuse / cost runaway | Per-IP token-bucket rate limit (12 req/60s), LRU-bounded to 10k tracked clients | `apps/web/app/api/chat/route.ts` |
 | Stored image XSS/MIME confusion on download | `default-src 'none'; sandbox`, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin` on every image response | `services/images/routers/images.py`, `apps/web/app/api/images/[id]/route.ts` |
+| Unauthenticated cross-service RAG mutation | Shared-secret `X-Internal-Token`, checked with `compare_digest`, required on every `/internal/rag/*` call from Products | `services/chatbot/app/deps/internal_auth.py` |
 
 ## Testing
 
-86 tests across four Python services, all offline — OpenAI, Supabase,
+126 tests across four Python services, all offline — OpenAI, Supabase,
 Firestore, and downstream HTTP calls are mocked or monkeypatched, so the suite
 never depends on network access or live credentials.
 
@@ -395,13 +415,17 @@ Stated plainly because a system with none would be suspicious:
 - **No response streaming.** The client waits for the full agent turn
   (up to 6 model round-trips) before seeing any text.
 - **RAG sync runs inline in the product write path.** Creating or updating a
-  product makes a synchronous OpenAI embedding call as part of that request,
-  and a transient failure there is logged and swallowed rather than queued
-  for retry — the catalog write still succeeds, but the index can silently
-  drift until the next edit.
+  product makes a synchronous HTTP call to `chatbot`'s
+  `/internal/rag/documents` (which in turn calls OpenAI) as part of that
+  request, and a transient failure there is logged and swallowed rather than
+  queued for retry — the catalog write still succeeds, but the index can
+  silently drift until the next edit or a `POST /api/products/force-rag-sync`.
 - **The images service has no authentication of its own.** It relies entirely
   on network isolation (only reachable from `web` and `products`); it does
-  not independently verify the caller.
+  not independently verify the caller. `chatbot`'s `/internal/rag/*` endpoints
+  are the one exception: they require a shared-secret `X-Internal-Token`
+  header, since `products` needs to call across a Vercel service boundary to
+  reach them.
 - **Retrieval is unranked and unevaluated.** Fixed-size character chunking, no
   reranking step, and no offline retrieval-quality harness — the 0.3 cosine
   threshold was tuned by observation, not a labeled eval set.
@@ -476,7 +500,7 @@ services are not exposed to the local network:
 | Web | `http://localhost:3000` | `http://web:3000` | all backends |
 | Auth | `http://localhost:8001` | `http://auth:8000` | — |
 | Orders | `http://localhost:8002` | `http://orders:8000` | — |
-| Products | `http://localhost:8003` | `http://products:8000` | Images |
+| Products | `http://localhost:8003` | `http://products:8000` | Images, Chatbot |
 | Chatbot | `http://localhost:8004` | `http://chatbot:8000` | Products, Orders |
 | Images | `http://localhost:8005` | `http://images:8000` | — |
 
@@ -485,8 +509,8 @@ local env files:
 
 - Web: `AUTH_API_URL`, `ORDERS_API_URL`, `PRODUCTS_API_URL`,
   `CHATBOT_API_URL`, and `IMAGE_SERVICE_BASE_URL`
-- Products: `IMAGE_SERVICE_BASE_URL=http://images:8000` and
-  `IMAGE_PUBLIC_BASE_PATH=/api/images`
+- Products: `IMAGE_SERVICE_BASE_URL=http://images:8000`,
+  `IMAGE_PUBLIC_BASE_PATH=/api/images`, and `CHATBOT_API_URL=http://chatbot:8000`
 - Chatbot: `PRODUCTS_API_URL=http://products:8000` and
   `ORDERS_API_URL=http://orders:8000`
 
@@ -535,6 +559,7 @@ Vercel injects deployment-aware URLs as follows:
 | Web | Chatbot | `CHATBOT_API_URL` |
 | Web | Images | `IMAGE_SERVICE_BASE_URL` |
 | Products | Images | `IMAGE_SERVICE_BASE_URL` |
+| Products | Chatbot | `CHATBOT_API_URL` |
 | Chatbot | Products | `PRODUCTS_API_URL` |
 | Chatbot | Orders | `ORDERS_API_URL` |
 
@@ -551,11 +576,11 @@ Set these values in the dashboard; do not upload local `.env` files:
 - Auth: the `FIREBASE_*` service-account fields,
   `FIREBASE_WEB_API_KEY`, provisioning flags, and `SESSION_*`
 - Orders: the `FIREBASE_*`, provisioning, and `SESSION_*` values
-- Products: the `FIREBASE_*`, `SESSION_*`, `OPENAI_API_KEY`,
-  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
-  `IMAGE_PUBLIC_BASE_PATH=/api/images` values
+- Products: the `FIREBASE_*`, `SESSION_*`,
+  `IMAGE_PUBLIC_BASE_PATH=/api/images`, and `INTERNAL_API_TOKEN` values
 - Chatbot: `OPENAI_API_KEY`, model/cost controls documented in its example,
-  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SESSION_COOKIE_NAME`
+  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_API_TOKEN` (must
+  match Products' value exactly), and `SESSION_COOKIE_NAME`
 - Images: the exact `FIREBASE_*` names in
   `services/images/.env.example`, plus `FIREBASE_COLLECTION`, the clamped
   `MAX_B64_BYTES`, and the image dimension limits
@@ -595,13 +620,15 @@ fields, `FIREBASE_WEB_API_KEY`, `ENABLE_FIRESTORE_PROVISIONING`,
 
 **`services/products`** — same `FIREBASE_*`/`SESSION_*` set, plus
 `IMAGE_SERVICE_BASE_URL`, `IMAGE_PUBLIC_BASE_PATH`, `LEGACY_IMAGE_HOSTS`
-(read-time compatibility for historical absolute image URLs), `OPENAI_API_KEY`,
-`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+(read-time compatibility for historical absolute image URLs),
+`CHATBOT_API_URL`, and `INTERNAL_API_TOKEN` (best-effort RAG sync calls to
+chatbot; holds no OpenAI or vector-DB credentials of its own).
 
 **`services/chatbot`** — `OPENAI_API_KEY`, `OPENAI_CHAT_MODEL`,
 `OPENAI_REASONING_EFFORT`, `OPENAI_MAX_OUTPUT_TOKENS`,
 `OPENAI_INPUT_PRICE_PER_M`, `OPENAI_CACHED_INPUT_PRICE_PER_M`,
 `OPENAI_OUTPUT_PRICE_PER_M`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+`INTERNAL_API_TOKEN` (validates `products`' calls to `/internal/rag/*`),
 `PRODUCTS_API_URL`, `ORDERS_API_URL`, `SESSION_COOKIE_NAME`,
 `ALLOWED_ORIGINS`, `CORS_ALLOW_CREDENTIALS`.
 

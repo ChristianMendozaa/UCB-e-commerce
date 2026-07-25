@@ -10,6 +10,7 @@ sys.path.insert(0, str(SERVICE_ROOT))
 os.environ["OPENAI_API_KEY"] = "test-openai-key"
 os.environ["SUPABASE_URL"] = "https://example.supabase.co"
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-supabase-key"
+os.environ["INTERNAL_API_TOKEN"] = "test-internal-token"
 os.environ["OPENAI_CHAT_MODEL"] = "gpt-5.6-terra"
 os.environ["OPENAI_REASONING_EFFORT"] = "low"
 os.environ["OPENAI_MAX_OUTPUT_TOKENS"] = "1500"

@@ -1,23 +1,16 @@
-import os
-from typing import List, Dict, Any
-from dotenv import load_dotenv
-from openai import OpenAI
-from supabase import create_client, Client
+import logging
+from typing import Dict, Any
 
-load_dotenv()
+import httpx
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+from app.config import CHATBOT_API_URL, INTERNAL_API_TOKEN
 
-if not (OPENAI_API_KEY and SUPABASE_URL and SUPABASE_KEY):
-    # Si faltan variables, no rompemos la app, pero logueamos advertencia
-    print("WARNING: Faltan variables de entorno para RAG (OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY). La sincronización no funcionará.")
-    openai_client = None
-    supabase = None
-else:
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+logger = logging.getLogger(__name__)
+
+_DOCUMENTS_URL = CHATBOT_API_URL + "/internal/rag/documents"
+_NAMESPACE = "products"
+_TIMEOUT = 10
+
 
 def get_product_text_representation(product: Dict[str, Any]) -> str:
     """
@@ -30,7 +23,7 @@ def get_product_text_representation(product: Dict[str, Any]) -> str:
     stock = product.get("stock", 0)
     category = product.get("category", "General")
     career = product.get("career", "General")
-    
+
     # Formato legible para el LLM
     text = (
         f"ID: {product.get('id', 'N/A')}\n"
@@ -43,85 +36,45 @@ def get_product_text_representation(product: Dict[str, Any]) -> str:
     )
     return text
 
-def embed_text(text: str) -> List[float]:
-    if not openai_client:
-        return []
-    try:
-        response = openai_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=text
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        print(f"Error generando embedding: {e}")
-        return []
 
-import uuid
-
-# ... imports ...
-
-def get_deterministic_uuid(source_id: str) -> str:
+def sync_product_to_rag(product_data: Dict[str, Any]) -> None:
     """
-    Genera un UUID determinista a partir de un ID de texto (Firestore ID).
-    Usamos UUID v5 con un namespace personalizado.
+    Sincroniza un producto (creación/edición) con el RAG del chatbot.
+    Best-effort: un fallo aquí nunca debe impedir que la escritura del
+    producto (ya persistida en Firestore) se reporte como exitosa.
     """
-    # Namespace arbitrario para nuestros productos
-    NAMESPACE_PRODUCTS = uuid.uuid5(uuid.NAMESPACE_DNS, "ucb-commerce-products")
-    return str(uuid.uuid5(NAMESPACE_PRODUCTS, source_id))
-
-def sync_product_to_rag(product_data: Dict[str, Any]):
-    """
-    Sincroniza un producto (creación/edición) con la tabla RAG.
-    Estrategia: Borrar chunks anteriores de este producto e insertar uno nuevo.
-    """
-    if not supabase or not openai_client:
-        return
-
     raw_id = product_data.get("id")
     if not raw_id:
         return
-    
-    # Convertir ID de Firestore a UUID válido para Supabase
-    product_uuid = get_deterministic_uuid(raw_id)
 
-    # 1. Borrar registros previos de este source_id
-    try:
-        supabase.table("rag_ucbcommerce_chunks").delete().eq("source_id", product_uuid).execute()
-    except Exception as e:
-        print(f"Error borrando chunks antiguos para {raw_id} ({product_uuid}): {e}")
-
-    # 2. Generar texto y embedding
     text = get_product_text_representation(product_data)
-    embedding = embed_text(text)
-    
-    if not embedding:
-        return
-
-    # 3. Insertar nuevo chunk
-    row = {
-        "source_id": product_uuid,
-        "chunk_index": 0,
-        "text": text,
-        "embedding": embedding
-    }
 
     try:
-        supabase.table("rag_ucbcommerce_chunks").insert(row).execute()
-        print(f"Producto {raw_id} sincronizado con RAG (UUID: {product_uuid}).")
-    except Exception as e:
-        print(f"Error insertando chunk para {raw_id}: {e}")
+        with httpx.Client(timeout=_TIMEOUT) as client:
+            resp = client.post(
+                _DOCUMENTS_URL,
+                json={"namespace": _NAMESPACE, "source_id": raw_id, "text": text},
+                headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+            )
+            resp.raise_for_status()
+        logger.info("Producto %s sincronizado con RAG.", raw_id)
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        logger.warning("No se pudo sincronizar el producto %s con el RAG.", raw_id, exc_info=True)
 
-def delete_product_from_rag(product_id: str):
+
+def delete_product_from_rag(product_id: str) -> None:
     """
-    Elimina los chunks de un producto del RAG.
+    Elimina los chunks de un producto del RAG. Best-effort, ver sync_product_to_rag.
     """
-    if not supabase:
-        return
-
-    product_uuid = get_deterministic_uuid(product_id)
-
     try:
-        supabase.table("rag_ucbcommerce_chunks").delete().eq("source_id", product_uuid).execute()
-        print(f"Producto {product_id} eliminado de RAG.")
-    except Exception as e:
-        print(f"Error eliminando chunks para {product_id}: {e}")
+        with httpx.Client(timeout=_TIMEOUT) as client:
+            resp = client.request(
+                "DELETE",
+                _DOCUMENTS_URL,
+                json={"namespace": _NAMESPACE, "source_id": product_id},
+                headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+            )
+            resp.raise_for_status()
+        logger.info("Producto %s eliminado del RAG.", product_id)
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        logger.warning("No se pudo eliminar el producto %s del RAG.", product_id, exc_info=True)

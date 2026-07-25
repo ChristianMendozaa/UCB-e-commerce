@@ -43,4 +43,10 @@ LEGACY_IMAGE_HOSTS = {
 }
 MAX_ORIGINAL_IMAGE_BYTES = 4 * 1024 * 1024
 
+CHATBOT_API_URL = os.getenv(
+    "CHATBOT_API_URL",
+    "http://localhost:8004"
+).rstrip("/")
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "")
+
 SESSION_EXPIRES_DELTA = timedelta(hours=SESSION_EXPIRES_HOURS)
