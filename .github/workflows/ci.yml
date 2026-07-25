@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# No secrets, no deploy step, no network calls to OpenAI/Supabase/Firebase.
+# Each Python service tests against mocked external dependencies (see each
+# service's tests/conftest.py); the web job only builds, it does not deploy.
+
+jobs:
+  python-tests:
+    name: pytest (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # `orders` has no automated test suite yet — see the root README's
+        # Known limitations.
+        service: [auth, chatbot, products, images]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install locked dependencies
+        run: python -m pip install --no-compile --require-hashes -r requirements.lock
+
+      - name: Install test dependencies
+        # A --require-hashes install cannot mix in unpinned packages, so test
+        # tooling is installed separately from the hash-locked requirements.
+        run: python -m pip install pytest pytest-asyncio
+
+      - name: Run tests
+        run: pytest
+
+  web-build:
+    name: web build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    env:
+      # Placeholder values so `next build` resolves NEXT_PUBLIC_* references.
+      # No real Firebase project is contacted during a build.
+      NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder-key
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci-placeholder.firebaseapp.com
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-placeholder-project
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build

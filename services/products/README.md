@@ -1,53 +1,81 @@
-# Products Service - UCB Commerce
+# Products service
 
-The central source of truth for the UCB Commerce catalog, managing product lifecycle, inventory, and categorization.
-
-## The Problem
-Managing a diverse catalog across multiple university careers requires a flexible schema. Traditional relational databases often struggle with the varying attributes of different product types (e.g., "Textbooks" vs. "Lab Equipment"). We needed a system that could handle this variability while maintaining strict consistency for inventory.
+FastAPI service for the UCB Commerce catalog, cart, and inventory. It is the
+source of truth for product data, and the write path that keeps the chatbot's
+retrieval index current. See the [root README](../../README.md) for system
+architecture and cross-service decisions.
 
 ## Architecture
+
 ```mermaid
 graph LR
-    Frontend -->|REST| API[FastAPI]
-    API -->|CRUD| DB[(Firestore NoSQL)]
-    API -->|Event| RAG[RAG Sync Hook]
-    RAG -->|Update| Supabase[(Supabase Vector)]
+    API[FastAPI] -->|CRUD| Firestore[(Firestore)]
+    API -->|upload| Images[Images Service]
+    API -->|on create/update| RAGSync[rag_sync.py]
+    RAGSync -->|embed + upsert| Supabase[(Supabase pgvector)]
 ```
 
-## Technical Decisions
+## Key decisions
 
-### Why Python & FastAPI?
-- **Speed**: FastAPI is one of the fastest Python frameworks, essential for high-traffic catalog browsing.
-- **Type Safety**: Pydantic models ensure that even with a NoSQL database, our application logic relies on strictly typed data structures, preventing runtime errors.
+- **Firestore over a relational store.** Product attributes vary a lot across
+  categories (textbooks vs. lab equipment vs. merchandise), so a flexible
+  document schema avoids a sparse, ever-growing set of nullable relational
+  columns.
+- **RAG sync runs inline on the write path**, not through a queue: a product
+  create/update calls `sync_product_to_rag`, which deletes any existing
+  chunks for that product and inserts a fresh one, keyed by a deterministic
+  `UUIDv5` derived from the Firestore ID (`app/core/rag_sync.py`). This keeps
+  the catalog and the vector index from drifting under normal operation; a
+  transient embedding failure is logged and swallowed rather than retried
+  (documented as a known limitation in the root README).
+- **Career-scoped RBAC.** Managing a product requires the `admin` role for
+  its career, or `platform_admin`. Moving a product between careers requires
+  authority over **both** the source and destination career
+  (`app/deps/permissions.py: can_move_product_or_403`) — an admin for one
+  career cannot use a reassignment to take over inventory that belongs to
+  another.
+- **Image uploads are proxied, not stored here.** `app/services/images.py`
+  forwards the multipart upload to the Images service (which does the actual
+  validation/re-encoding) and stores back only the resulting `/api/images/{id}`
+  path.
 
-### Why Google Firestore (NoSQL)?
-We chose **Firestore** over a SQL database for the catalog because of its **flexible schema**. Products in an e-commerce setting often have different attributes. Firestore allows us to store these heterogeneous documents efficiently without complex join tables. Additionally, its real-time capabilities allow for future features like live stock updates.
+## Cart → order handoff
 
-### RAG Synchronization
-To support the Chatbot Service, this service implements an **Event-Driven** pattern. Whenever a product is created or updated, a hook triggers a synchronization process that updates the vector embeddings in Supabase. This ensures the AI assistant always has the latest product data without needing a full re-index.
+The cart lives in Firestore under `carts/{uid}`. `services/orders` reads it
+directly when creating an order: it re-validates stock for every item inside
+a Firestore transaction (re-reading current stock, rejecting if it changed),
+decrements stock, writes the order, and clears the cart — all as one atomic
+transaction, so two concurrent checkouts against the last unit of stock
+cannot both succeed. See `services/orders/app/routers/orders.py: create_order`.
 
-## Features
-- **CRUD Operations**: Complete management of products.
-- **Category & Career Filtering**: Hierarchical organization.
-- **Inventory Management**: Basic stock tracking.
-- **RAG Sync**: Automatic vector embedding updates.
+## API surface
 
-## Tech Stack
-- **Language**: Python 3.10+
-- **Framework**: FastAPI
-- **Database**: Google Firestore
+- `GET /api/products/public`, `GET /api/products/{id}` — public catalog read.
+- `GET|POST /api/products` — authenticated list/create.
+- `POST /api/products/form` — create with a multipart image upload.
+- `GET|PUT|DELETE` cart endpoints under `/api/cart` (see `app/routers/cart.py`).
 
-## Setup & Run
+## Configuration
 
-1.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+Required: the `FIREBASE_*` service-account fields, `SESSION_COOKIE_NAME`,
+`OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
-2.  **Configure Environment Variables:**
-    Set up `.env` with Firebase credentials and Supabase keys (for RAG sync).
+Also used: `ALLOWED_ORIGINS`, `ENABLE_FIRESTORE_PROVISIONING`,
+`SESSION_EXPIRES_HOURS`, `SESSION_COOKIE_DOMAIN`, `SESSION_COOKIE_SECURE`,
+`IMAGE_SERVICE_BASE_URL`, `IMAGE_PUBLIC_BASE_PATH`, `LEGACY_IMAGE_HOSTS`
+(read-time compatibility for historical absolute image URLs).
 
-3.  **Run Server:**
-    ```bash
-    uvicorn app.main:app --reload --port 8003
-    ```
+## Development
+
+```bash
+python -m pip install -r requirements.txt pytest
+uvicorn app.main:app --reload --port 8003
+pytest
+```
+
+14 tests covering career-scoped permissions, image upload error propagation,
+upload size limits, and image URL derivation — all against mocked
+Firestore/HTTP, no live credentials required.
+
+This service is part of the UCB Commerce monorepo. Run the full system from
+the repository root with `docker compose up --build`.

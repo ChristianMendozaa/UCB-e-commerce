@@ -16,6 +16,19 @@ const SAFE_IMAGE_CONTENT_TYPES = new Set([
   "image/webp",
 ])
 
+// Must match IMAGE_VARIANT_WIDTHS in services/images/config.py. Rejecting an
+// out-of-list width here (instead of forwarding it) protects the origin from
+// CPU amplification and keeps the CDN cache key from being polluted with
+// arbitrary widths.
+const ALLOWED_VARIANT_WIDTHS = new Set([96, 320, 640])
+
+// Set on every 200/304 image response. The image itself is fetched by
+// immutable ID (products/orders always mint a new ID rather than mutating
+// one in place), so a year-long cache is honest. All three headers are set
+// explicitly rather than relying on a single one being interpreted for both
+// the browser and the CDN tier.
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
 export const GET = handler
 export const HEAD = handler
 
@@ -32,9 +45,20 @@ async function handler(
     )
   }
 
+  const widthParam = req.nextUrl.searchParams.get("w")
+  let width: number | undefined
+  if (widthParam !== null) {
+    width = Number(widthParam)
+    if (!ALLOWED_VARIANT_WIDTHS.has(width)) {
+      return proxyErrorResponse(req.method, 400, "Ancho solicitado no permitido.")
+    }
+  }
+
   const target = new URL(
     `${imagesBaseUrl}/images/${encodeURIComponent(ctx.params.id)}`,
   )
+  if (width !== undefined) target.searchParams.set("w", String(width))
+
   const requestHeaders = new Headers()
   for (const name of [
     "accept",
@@ -71,7 +95,6 @@ async function handler(
     const responseHeaders = new Headers()
     for (const name of [
       "accept-ranges",
-      "cache-control",
       "content-disposition",
       "content-length",
       "content-range",
@@ -81,6 +104,22 @@ async function handler(
     ]) {
       const value = upstream.headers.get(name)
       if (value) responseHeaders.set(name, value)
+    }
+
+    // The images service always emits a strong ETag and an immutable
+    // Cache-Control on 200/304 (see routers/images.py). Re-assert the CDN
+    // variants of the header explicitly here rather than only forwarding
+    // whatever upstream sent, since Vercel's edge honors
+    // Vercel-CDN-Cache-Control / CDN-Cache-Control ahead of a plain
+    // Cache-Control. Any other status (404, 502, ...) must never be cached —
+    // a container cold-start returning a transient error must not stick for
+    // a year.
+    if (upstream.status === 200 || upstream.status === 304) {
+      responseHeaders.set("cache-control", IMMUTABLE_CACHE_CONTROL)
+      responseHeaders.set("cdn-cache-control", IMMUTABLE_CACHE_CONTROL)
+      responseHeaders.set("vercel-cdn-cache-control", IMMUTABLE_CACHE_CONTROL)
+    } else {
+      responseHeaders.set("cache-control", "no-store")
     }
     setImageSecurityHeaders(responseHeaders)
 

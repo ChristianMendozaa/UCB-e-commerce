@@ -1,38 +1,52 @@
-# Chatbot Service - UCB Commerce
+# Chatbot service
 
-Microservicio FastAPI para el asistente conversacional de UCB Commerce. El
-agente usa OpenAI Responses API, herramientas locales y recuperación semántica
-en Supabase.
+FastAPI service for the UCB Commerce conversational shopping agent. It runs a
+bounded tool-calling loop against the OpenAI Responses API and a
+Supabase/pgvector retrieval index. See the [root README](../../README.md) for
+the full system architecture, the agent's confirmation model, and the
+security rationale — this file covers the service in isolation.
 
-## Arquitectura
+## Architecture
 
-- Chat y tool calling: `gpt-5.6-terra`.
-- API: OpenAI Responses en modo stateless (`store=False`).
-- Razonamiento: configurable, `low` por defecto.
-- Embeddings: `text-embedding-3-small`, 1536 dimensiones.
-- Base vectorial: Supabase con pgvector.
-- Integraciones: Products Service y Orders Service.
+```mermaid
+graph LR
+    Chat["POST /chat"] --> Loop[Agent loop\nstore=False, ≤6 steps]
+    Loop -->|tool calls| Tools[core/tools.py]
+    Tools -->|rag_search| RAG[Supabase pgvector]
+    Tools -->|cart/order tools| Products[Products Service]
+    Tools -->|create_order| Orders[Orders Service]
+    Loop --> OpenAI[[OpenAI Responses API]]
+```
 
-El loop conserva todos los elementos de `response.output` y devuelve cada
-resultado con su `call_id`. Las lecturas contiguas pueden ejecutarse en
-paralelo. Como máximo se ejecuta una acción que modifique estado por ronda, y
-el agente debe reevaluar su resultado antes de continuar. Cada consulta está
-limitada a 6 pasos.
+## Key decisions
 
-Las mutaciones requieren una confirmación independiente y vinculada a sus
-argumentos: `Confirmo agregar PRODUCT_ID cantidad N` (1–20), `Confirmo quitar
-PRODUCT_ID del carrito`, `Confirmo vaciar el carrito` o `Confirmo crear el
-pedido`. El ID conserva mayúsculas/minúsculas y cada confirmación se consume
-una sola vez, incluso si falla la llamada descendente.
+- **Model:** configurable via `OPENAI_CHAT_MODEL` (defaults to
+  `gpt-5.6-terra`); never hardcode a model name in new code.
+- **Stateless turns:** the Responses API is called with `store=False`, so the
+  server holds no conversation memory — every `response.output` item
+  (including reasoning) is replayed within a turn to keep multi-step tool use
+  coherent.
+- **Bounded and defensive by construction:** at most 6 reasoning steps per
+  turn; contiguous read-only tool calls run concurrently
+  (`asyncio.gather`); at most one mutating tool executes per step and the
+  agent must observe its result before trying again; the final step never
+  executes tools, only reports the step limit was reached.
+- **Mutations require a confirmation phrase from the user's literal message**
+  — not the model's interpretation — bound to the exact tool arguments and
+  consumed exactly once. See the root README for the full rationale and the
+  four exact phrases.
+- **RAG output is untrusted data.** Every retrieved chunk is wrapped as
+  `{"untrusted_data": true, "source": "rag", "content": ...}`; the system
+  prompt forbids treating it as instructions.
 
 ## Endpoints
 
-- `GET /`: estado básico del servicio.
+- `GET /`: basic service status.
 - `GET /health`: liveness check.
-- `POST /chat`: conserva el contrato del frontend.
-- `POST /upload`: carga texto al índice RAG.
+- `POST /chat`: the agent endpoint.
+- `POST /upload`: ingest a plain-text document into the RAG index.
 
-Ejemplo de entrada de `POST /chat`:
+`POST /chat` request:
 
 ```json
 {
@@ -45,7 +59,7 @@ Ejemplo de entrada de `POST /chat`:
 }
 ```
 
-La respuesta mantiene:
+Response:
 
 ```json
 {
@@ -55,52 +69,36 @@ La respuesta mantiene:
 }
 ```
 
-El trace solo contiene llamadas y resultados sanitizados de herramientas; no
-expone razonamiento interno.
+`trace` contains only sanitized tool calls and results (capped at 500
+characters each) — it never exposes model reasoning. `cost` is computed from
+actual token usage across four billing classes (see the root README's
+"Cost engineering" section).
 
-## Herramientas
+## Tools
 
-- `rag_search_tool`
-- `search_products_tool`
-- `get_cart_tool`
-- `add_to_cart_tool`
-- `remove_from_cart_tool`
-- `clear_cart_tool`
-- `create_order_tool`
-- `navigate_tool`
+`rag_search_tool` · `search_products_tool` · `get_cart_tool` ·
+`add_to_cart_tool` · `remove_from_cart_tool` · `clear_cart_tool` ·
+`create_order_tool` · `navigate_tool`
 
-Las herramientas autenticadas detectan la cookie configurada mediante
-`SESSION_COOKIE_NAME`.
+Authenticated tools detect the session cookie named by `SESSION_COOKIE_NAME`
+and return `"AUTH_REQUIRED"` when it's missing, which the loop turns into a
+login navigation command rather than a raw error.
 
-## Configuración
+## Configuration
 
-Variables requeridas:
+Required: `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
-- `OPENAI_API_KEY`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+Optional (defaults shown): `OPENAI_CHAT_MODEL` (`gpt-5.6-terra`),
+`OPENAI_REASONING_EFFORT` (`low`), `OPENAI_MAX_OUTPUT_TOKENS` (`1500`),
+`OPENAI_INPUT_PRICE_PER_M`, `OPENAI_CACHED_INPUT_PRICE_PER_M`,
+`OPENAI_OUTPUT_PRICE_PER_M`, `PRODUCTS_API_URL`, `ORDERS_API_URL`,
+`SESSION_COOKIE_NAME`, `ALLOWED_ORIGINS`, `CORS_ALLOW_CREDENTIALS`.
 
-Variables opcionales:
+Price env vars exist so the reported `cost` field tracks whatever the OpenAI
+account is actually billed on a given deployment date. If `ALLOWED_ORIGINS`
+contains `*`, the service forces `CORS_ALLOW_CREDENTIALS=false`.
 
-- `OPENAI_CHAT_MODEL` (`gpt-5.6-terra` por defecto)
-- `OPENAI_REASONING_EFFORT` (`low` por defecto)
-- `OPENAI_MAX_OUTPUT_TOKENS` (1500 por defecto)
-- `OPENAI_INPUT_PRICE_PER_M`
-- `OPENAI_CACHED_INPUT_PRICE_PER_M`
-- `OPENAI_OUTPUT_PRICE_PER_M`
-- `PRODUCTS_API_URL`
-- `ORDERS_API_URL`
-- `SESSION_COOKIE_NAME`
-- `ALLOWED_ORIGINS`
-- `CORS_ALLOW_CREDENTIALS`
-
-Las tarifas pueden sobreescribirse para mantener el campo `cost` alineado con
-la cuenta y fecha de despliegue. El cálculo contempla lectura y escritura de
-caché de prompts y el multiplicador de contexto largo del modelo configurado.
-Si `ALLOWED_ORIGINS` contiene `*`, el servicio fuerza
-`CORS_ALLOW_CREDENTIALS=false`.
-
-## Desarrollo
+## Development
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -108,5 +106,11 @@ uvicorn app.main:app --reload --port 8004
 pytest
 ```
 
-Las pruebas usan clientes y respuestas simuladas; no realizan llamadas reales a
-OpenAI, Supabase, Products ni Orders.
+48 tests, fully offline — OpenAI, Supabase, Products, and Orders are all
+mocked. Representative cases: `test_only_one_mutating_tool_executes_per_model_step`,
+`test_bound_confirmation_is_consumed_after_one_mutation`,
+`test_rag_results_are_marked_as_untrusted_data`,
+`test_agent_never_executes_a_mutation_on_the_final_model_round`.
+
+This service is part of the UCB Commerce monorepo. Run the full system from
+the repository root with `docker compose up --build`.

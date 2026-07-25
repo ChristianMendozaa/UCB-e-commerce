@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import type { Order } from "@/lib/orders"
 import type { User } from "@/lib/database"
 import type { Product } from "@/lib/products"
+import { imageUrl } from "@/lib/image-url"
 
 type Props = {
   open: boolean
@@ -69,8 +70,12 @@ const OrderViewModal: FC<Props> = ({
                     <div key={idx} className="flex items-center justify-between p-2 border rounded">
                       <div className="flex items-center space-x-3">
                         <img
-                          src={product?.image || "/placeholder.svg"}
+                          src={imageUrl(product?.image, 96) || "/placeholder.svg"}
                           alt={product?.name || "Producto"}
+                          width={40}
+                          height={40}
+                          loading="lazy"
+                          decoding="async"
                           className="w-10 h-10 object-cover rounded"
                         />
                         <div>

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { Product } from "@/lib/products"
+import { imageUrl } from "@/lib/image-url"
 type Props = {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -24,8 +25,12 @@ const ProductViewModal: FC<Props> = ({ open, onOpenChange, product, getStockBadg
           <div className="space-y-4">
             <div className="flex items-start space-x-4">
               <img
-                src={product.image || "/placeholder.svg"}
+                src={imageUrl(product.image, 320) || "/placeholder.svg"}
                 alt={product.name}
+                width={96}
+                height={96}
+                loading="lazy"
+                decoding="async"
                 className="w-24 h-24 object-cover rounded-lg"
               />
               <div className="flex-1">

@@ -142,13 +142,14 @@ export default function ProductDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           {/* Product Image */}
           <div className="space-y-4">
-            <div className="aspect-square relative overflow-hidden rounded-lg border bg-muted">
+            <div className="aspect-square relative overflow-hidden rounded-lg border bg-muted animate-pulse">
               <Image
                 src={product.image || "/placeholder.svg"}
                 alt={product.name}
                 fill
                 className="object-cover"
                 sizes="(max-width: 768px) 100vw, 50vw"
+                priority
               />
             </div>
           </div>

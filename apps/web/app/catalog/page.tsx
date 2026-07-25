@@ -255,8 +255,13 @@ export default function CatalogPage() {
                 : "space-y-4"
             }
           >
-            {filteredProducts.map((product) => (
-              <ProductCard key={product.id} product={product} onAddToCart={loadProducts} />
+            {filteredProducts.map((product, index) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                onAddToCart={loadProducts}
+                priority={index < 4}
+              />
             ))}
           </div>
         )}

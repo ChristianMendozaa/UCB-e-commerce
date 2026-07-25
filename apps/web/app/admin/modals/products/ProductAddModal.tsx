@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { ProductFormState } from "@/lib/products"
 import { assertOriginalImageSize } from "@/lib/upload-limits"
+import { imageUrl } from "@/lib/image-url"
 import { Loader2 } from "lucide-react"
 
 type Props = {
@@ -105,7 +106,17 @@ const ProductAddModal: FC<Props> = ({
           <div className="space-y-2">
             <Label>Imagen</Label>
             <Input type="file" accept="image/*" onChange={onFile} />
-            {form.image && <img src={form.image} alt="preview" className="h-24 w-24 mt-2 rounded object-cover" />}
+            {form.image && (
+              <img
+                src={imageUrl(form.image, 320)}
+                alt="preview"
+                width={96}
+                height={96}
+                loading="lazy"
+                decoding="async"
+                className="h-24 w-24 mt-2 rounded object-cover"
+              />
+            )}
             <p className="text-xs text-muted-foreground">Selecciona un archivo de hasta 4 MiB. El backend generará la URL pública.</p>
           </div>
         </div>
