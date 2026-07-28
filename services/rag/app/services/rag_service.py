@@ -109,6 +109,12 @@ def get_product_text_representation(product: Dict[str, Any]) -> str:
     stock = product.get("stock", 0)
     category = product.get("category", "General")
     career = product.get("career", "General")
+    tags = ", ".join(product.get("tags") or [])
+    use_cases = ", ".join(product.get("use_cases") or [])
+    attributes = ", ".join(
+        f"{key}: {value}"
+        for key, value in (product.get("attributes") or {}).items()
+    )
     return (
         f"ID: {product.get('id', 'N/A')}\n"
         f"Producto: {name}\n"
@@ -116,6 +122,9 @@ def get_product_text_representation(product: Dict[str, Any]) -> str:
         f"Carrera: {career}\n"
         f"Precio: {price} Bs.\n"
         f"Stock disponible: {stock}\n"
+        f"Etiquetas: {tags or 'Sin etiquetas'}\n"
+        f"Usos: {use_cases or 'Sin usos registrados'}\n"
+        f"Atributos: {attributes or 'Sin atributos registrados'}\n"
         f"Descripción: {description}"
     )
 

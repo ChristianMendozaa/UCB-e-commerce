@@ -37,7 +37,10 @@ async def test_rag_results_are_marked_as_untrusted_data(monkeypatch):
     assert result == {
         "untrusted_data": True,
         "source": "rag",
-        "content": injected_content,
+        "content": {
+            "text": injected_content,
+            "chunks": [],
+        },
     }
 
 
@@ -82,7 +85,7 @@ class FakeHTTPClient:
 async def test_tools_use_configured_session_cookie_name(monkeypatch):
     fake_client = FakeHTTPClient()
     monkeypatch.setattr(tools, "SESSION_COOKIE_NAME", "ucb_session")
-    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda: fake_client)
+    monkeypatch.setattr(tools, "get_http_client", lambda: fake_client)
 
     assert await tools.get_cart_tool({"__session": "legacy"}) == "AUTH_REQUIRED"
     assert (
@@ -96,7 +99,7 @@ async def test_tools_use_configured_session_cookie_name(monkeypatch):
 async def test_cart_tools_validate_ids_and_encode_path_segments(monkeypatch):
     fake_client = FakeHTTPClient()
     monkeypatch.setattr(tools, "SESSION_COOKIE_NAME", "ucb_session")
-    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda: fake_client)
+    monkeypatch.setattr(tools, "get_http_client", lambda: fake_client)
     cookies = {"ucb_session": "configured"}
 
     assert (

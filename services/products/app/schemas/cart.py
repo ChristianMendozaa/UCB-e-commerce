@@ -1,9 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Dict, Any
 
 class CartItemIn(BaseModel):
-    productId: str
-    quantity: int
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    productId: str = Field(min_length=1, max_length=1_500)
+    quantity: int = Field(ge=1, le=20)
 
 class CartItemOut(BaseModel):
     productId: str

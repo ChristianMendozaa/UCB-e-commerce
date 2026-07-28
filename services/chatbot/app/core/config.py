@@ -37,6 +37,15 @@ def _reasoning_effort(name: str, default: str) -> str:
     return value
 
 
+def _response_verbosity(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip().lower()
+    supported_values = {"low", "medium", "high"}
+    if value not in supported_values:
+        supported = ", ".join(sorted(supported_values))
+        raise RuntimeError(f"{name} debe ser uno de: {supported}.")
+    return value
+
+
 def _boolean(name: str, default: bool) -> bool:
     raw_value = os.getenv(name, str(default)).strip().lower()
     if raw_value in {"1", "true", "yes", "on"}:
@@ -54,7 +63,11 @@ def cors_credentials_allowed(origins: list[str], configured: bool) -> bool:
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-terra")
 OPENAI_REASONING_EFFORT = _reasoning_effort("OPENAI_REASONING_EFFORT", "low")
-OPENAI_MAX_OUTPUT_TOKENS = _positive_int("OPENAI_MAX_OUTPUT_TOKENS", 1500)
+OPENAI_MAX_OUTPUT_TOKENS = _positive_int("OPENAI_MAX_OUTPUT_TOKENS", 900)
+OPENAI_RESPONSE_VERBOSITY = _response_verbosity(
+    "OPENAI_RESPONSE_VERBOSITY",
+    "low",
+)
 OPENAI_INPUT_PRICE_PER_M = _non_negative_float("OPENAI_INPUT_PRICE_PER_M", 2.50)
 OPENAI_CACHED_INPUT_PRICE_PER_M = _non_negative_float(
     "OPENAI_CACHED_INPUT_PRICE_PER_M",
@@ -64,6 +77,14 @@ OPENAI_OUTPUT_PRICE_PER_M = _non_negative_float("OPENAI_OUTPUT_PRICE_PER_M", 15.
 
 # Servicios
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
+CHAT_ACTION_SIGNING_SECRET = os.getenv(
+    "CHAT_ACTION_SIGNING_SECRET",
+    INTERNAL_API_TOKEN or "",
+)
+CHAT_SESSION_COOKIE_NAME = os.getenv(
+    "CHAT_SESSION_COOKIE_NAME",
+    "ucb_chat_session",
+)
 PRODUCTS_API_URL = os.getenv(
     "PRODUCTS_API_URL",
     "http://localhost:8000",
@@ -96,12 +117,17 @@ missing_variables = [
     for name, value in (
         ("OPENAI_API_KEY", OPENAI_API_KEY),
         ("INTERNAL_API_TOKEN", INTERNAL_API_TOKEN),
+        ("CHAT_ACTION_SIGNING_SECRET", CHAT_ACTION_SIGNING_SECRET),
     )
     if not value
 ]
 if missing_variables:
     raise RuntimeError(
         "Faltan variables de entorno requeridas: " + ", ".join(missing_variables)
+    )
+if len(CHAT_ACTION_SIGNING_SECRET) < 32:
+    raise RuntimeError(
+        "CHAT_ACTION_SIGNING_SECRET debe tener al menos 32 caracteres."
     )
 
 # El cliente asíncrono atiende el agente. Los retries del agente se controlan

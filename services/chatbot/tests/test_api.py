@@ -131,3 +131,64 @@ def test_health():
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_v2_turn_streams_structured_events(monkeypatch):
+    async def fake_run_agent(*args, **kwargs):
+        assert kwargs["structured"] is True
+        assert kwargs["session_id"]
+        assert kwargs["page_context"]["surface"] == "catalog"
+        await kwargs["event_sink"](
+            "tool.status",
+            {
+                "phase": "started",
+                "step": 1,
+                "tools": ["search_products_tool"],
+                "message": "Consultando el catálogo actual…",
+            },
+        )
+        await kwargs["event_sink"](
+            "assistant.delta",
+            {"delta": "Encontré opciones."},
+        )
+        return {
+            "answer": "Encontré opciones.",
+            "trace": [],
+            "cost": 0.001,
+            "ui_actions": [
+                {
+                    "id": "action-1",
+                    "version": 1,
+                    "type": "catalog.apply_filters",
+                    "payload": {"filters": {"query": "mochila"}},
+                }
+            ],
+            "renderables": [],
+            "pending_confirmation": None,
+        }
+
+    monkeypatch.setattr(chat_router, "run_agent", fake_run_agent)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat/turns",
+            json={
+                "question": "Busca una mochila",
+                "page_context": {
+                    "route": "/catalog",
+                    "surface": "catalog",
+                    "revision": 1,
+                    "capabilities": ["catalog.apply_filters"],
+                    "state": {},
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: turn.started" in response.text
+    assert "event: assistant.delta" in response.text
+    assert "event: tool.status" in response.text
+    assert "event: ui.action" in response.text
+    assert "event: turn.completed" in response.text
+    assert response.cookies.get("ucb_chat_session")

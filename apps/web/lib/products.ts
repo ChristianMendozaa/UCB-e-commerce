@@ -12,6 +12,10 @@ export type Product = {
   career: string
   stock: number
   image: string
+  tags?: string[]
+  use_cases?: string[]
+  attributes?: Record<string, string>
+  complementary_product_ids?: string[]
   createdAt: string | Date
   updatedAt?: string | Date
 }

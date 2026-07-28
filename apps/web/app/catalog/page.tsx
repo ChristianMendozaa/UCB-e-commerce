@@ -1,7 +1,7 @@
 // app/catalog/page.tsx
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Header } from "@/components/header"
 import { ProductCard } from "@/components/product-card"
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,8 @@ import { Search, Filter, Grid, List } from "lucide-react"
 // ⬇️ usa los tipos reales y la API real
 import type { Product } from "@/lib/products"
 import { productsApi } from "@/lib/products"
+import { useAssistantPage } from "@/contexts/assistant-context"
+import type { AssistantAction } from "@/lib/assistant-protocol"
 
 export default function CatalogPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -97,6 +99,86 @@ export default function CatalogPage() {
     setSelectedCategory("all")
     setSortBy("name")
   }
+
+  const handleAssistantAction = useCallback((action: AssistantAction) => {
+    if (action.type === "catalog.apply_filters") {
+      const filters = (
+        typeof action.payload.filters === "object"
+        && action.payload.filters !== null
+        ? action.payload.filters
+        : {}
+      ) as Record<string, unknown>
+      setSearchTerm(typeof filters.query === "string" ? filters.query : "")
+      setSelectedCareer(
+        typeof filters.career === "string" ? filters.career : "all",
+      )
+      setSelectedCategory(
+        typeof filters.category === "string" ? filters.category : "all",
+      )
+      if (typeof action.payload.sort === "string") {
+        setSortBy(action.payload.sort)
+      }
+      if (action.payload.view === "grid" || action.payload.view === "list") {
+        setViewMode(action.payload.view)
+      }
+      return
+    }
+    if (action.type === "catalog.clear_filters") {
+      clearFilters()
+      return
+    }
+    if (
+      action.type === "catalog.set_sort"
+      && typeof action.payload.sort === "string"
+    ) {
+      setSortBy(action.payload.sort)
+      return
+    }
+    if (
+      action.type === "catalog.set_view"
+      && (action.payload.view === "grid" || action.payload.view === "list")
+    ) {
+      setViewMode(action.payload.view)
+      return
+    }
+    if (action.type === "products.highlight") {
+      const productIds = Array.isArray(action.payload.product_ids)
+        ? action.payload.product_ids.filter((value): value is string => typeof value === "string")
+        : []
+      const visible = new Set(filteredProducts.map((product) => product.id))
+      for (const productId of productIds) {
+        if (!visible.has(productId)) continue
+        const element = document.getElementById(`assistant-product-${productId}`)
+        if (!element) continue
+        element.scrollIntoView({ behavior: "smooth", block: "center" })
+        element.classList.add("ring-4", "ring-primary", "ring-offset-2")
+        window.setTimeout(() => {
+          element.classList.remove("ring-4", "ring-primary", "ring-offset-2")
+        }, 2_500)
+      }
+    }
+  }, [filteredProducts])
+
+  useAssistantPage({
+    surface: "catalog",
+    capabilities: [
+      "catalog.apply_filters",
+      "catalog.clear_filters",
+      "catalog.set_sort",
+      "catalog.set_view",
+      "products.highlight",
+    ],
+    state: {
+      query: searchTerm,
+      career: selectedCareer,
+      category: selectedCategory,
+      sort: sortBy,
+      view: viewMode,
+      visible_product_ids: filteredProducts.slice(0, 40).map((product) => product.id),
+      result_count: filteredProducts.length,
+    },
+    handleAction: handleAssistantAction,
+  })
 
   const activeFiltersCount = [
     searchTerm,
@@ -256,12 +338,17 @@ export default function CatalogPage() {
             }
           >
             {filteredProducts.map((product, index) => (
-              <ProductCard
+              <div
+                id={`assistant-product-${product.id}`}
                 key={product.id}
-                product={product}
-                onAddToCart={loadProducts}
-                priority={index < 4}
-              />
+                className="rounded-lg transition-all"
+              >
+                <ProductCard
+                  product={product}
+                  onAddToCart={loadProducts}
+                  priority={index < 4}
+                />
+              </div>
             ))}
           </div>
         )}

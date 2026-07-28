@@ -57,21 +57,33 @@ one, say so explicitly rather than letting it drift:
   It only reports that the step budget was reached. This prevents a mutation
   from succeeding with no way to communicate the result, and prevents a
   client retry from duplicating it.
-- **Mutating tools require a confirmation phrase parsed from the user's
-  literal current message, not from the model's tool-call arguments alone.**
-  The parsed confirmation's arguments must match the tool call's arguments
-  exactly, and the confirmation is consumed on the first matching attempt —
-  even if the downstream call then fails.
+- **Mutating tools require confirmation outside the model.** The legacy
+  `/chat` contract still accepts argument-bound literal phrases. The v2
+  `/chat/turns` contract emits an HMAC-signed, five-minute confirmation token
+  bound to session, tool, exact arguments, and an idempotency key; only
+  `/chat/confirmations` may execute it. Products and Orders must enforce that
+  idempotency key so replay or a retry cannot duplicate a cart increment,
+  stock decrement, or order.
 - **RAG results stay wrapped as `{"untrusted_data": true, ...}`.** Never
   return raw retrieved text to the model, and never relax the system prompt's
   instruction to treat tool/RAG output as data, not commands.
-- **`navigate_tool` stays allowlisted.** Only known static paths or validated
-  product/career IDs; `/admin` is explicitly excluded. The frontend
-  (`chat-widget.tsx: safeNavigationPath`) re-validates independently — keep
-  both checks in sync if the allowlist changes.
+- **Navigation and UI effects stay allowlisted.** Only known static paths or
+  validated product/career IDs; `/admin` is explicitly excluded. Both the
+  legacy widget and the v2 `AssistantProvider` re-validate independently.
+  Page-specific effects must be declared as capabilities and validated with
+  Pydantic server-side and Zod client-side; never add arbitrary selectors,
+  HTML, JavaScript, or component names.
 - **Every `response.output` item is preserved and replayed** in the next
   model call within a turn (the loop runs with `store=False`). Dropping
   reasoning or function-call items breaks multi-step tool use.
+- **V2 forwards real Responses API deltas.** Keep
+  `response.output_text.delta` connected to `assistant.delta`; do not regress
+  to waiting for `run_agent` and slicing a completed answer. Tool progress is
+  a separate `tool.status` event and must not expose arguments or credentials.
+- **Chatbot service calls reuse the lifecycle-managed HTTP client.** New
+  Products, Orders, or RAG tools must use
+  `app.services.http_client.get_http_client()` rather than creating a client
+  per call; `app.main` closes the pool during shutdown.
 - **Every token/cookie verification path uses `check_revoked=True`**,
   including the 15-second clock-skew retry paths in `deps/auth.py` and
   `routers/auth.py`. Don't add a verification call that skips revocation
@@ -109,8 +121,9 @@ one, say so explicitly rather than letting it drift:
 | To change... | Look in... |
 |---|---|
 | Agent loop, step budget, retry policy | `services/chatbot/app/services/agent_service.py` |
-| Tool implementations, confirmation regex, navigation allowlist | `services/chatbot/app/core/tools.py` |
-| System prompt / tool schemas | `services/chatbot/app/core/tools.py` (`SYSTEM_PROMPT`, `TOOLS_SCHEMA`) |
+| Tool implementations and navigation allowlist | `services/chatbot/app/core/tools.py` |
+| System prompt / tool registry / legacy confirmation regex | `services/chatbot/app/services/agent_service.py` |
+| Signed v2 confirmation protocol | `services/chatbot/app/services/confirmation_service.py`, `services/chatbot/app/routers/chat.py` |
 | RAG query (chat-time) and RAG write/embedding (`index_document`, `delete_document`) | `services/rag/app/services/rag_service.py`, exposed via `services/rag/app/routers/rag.py`; `chatbot` calls it over HTTP through `services/chatbot/app/services/rag_client.py` |
 | RAG sync trigger (product write-time) | `services/products/app/core/rag_sync.py` — sends a product ID to `rag`'s `/internal/rag/documents`; `rag` reads and formats the Firestore product |
 | Internal service-to-service auth (shared token) | `services/rag/app/deps/internal_auth.py` — validated by `rag`; sent by `products` and `chatbot` |
@@ -119,7 +132,7 @@ one, say so explicitly rather than letting it drift:
 | Session cookie lifecycle | `services/auth/app/routers/auth.py`, `services/*/app/deps/auth.py` |
 | Image validation/re-encode | `services/images/utils/utils.py`, `services/images/config.py` |
 | BFF proxying, upload limits, chat rate limiting | `apps/web/app/api/*/route.ts`, `apps/web/lib/server/*`, `apps/web/lib/upload-limits.ts` |
-| Chat widget, client-side navigation re-validation | `apps/web/components/chat-widget.tsx` |
+| V2 seller panel, page capabilities, navigation re-validation | `apps/web/components/assistant-panel.tsx`, `apps/web/contexts/assistant-context.tsx` |
 
 ## Current state and gotchas
 

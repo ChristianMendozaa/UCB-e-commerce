@@ -10,7 +10,7 @@ security rationale — this file covers the service in isolation.
 
 ```mermaid
 graph LR
-    Chat["POST /chat"] --> Loop[Agent loop\nstore=False, ≤6 steps]
+    Chat["POST /chat or /chat/turns"] --> Loop[Agent loop\nstore=False, ≤6 steps]
     Loop -->|tool calls| Tools[core/tools.py]
     Tools -->|rag_search| RAG[Private RAG service]
     Tools -->|cart/order tools| Products[Products Service]
@@ -31,19 +31,27 @@ graph LR
   (`asyncio.gather`); at most one mutating tool executes per step and the
   agent must observe its result before trying again; the final step never
   executes tools, only reports the step limit was reached.
-- **Mutations require a confirmation phrase from the user's literal message**
-  — not the model's interpretation — bound to the exact tool arguments and
-  consumed exactly once. See the root README for the full rationale and the
-  four exact phrases.
+- **Mutations require confirmation outside the model.** The v2 API returns a
+  five-minute HMAC-signed action token bound to the session, exact tool
+  arguments, and an idempotency key. `/chat/confirmations` executes it after
+  a visual approval; Products and Orders make retries safe. The legacy
+  endpoint retains its literal phrases only for rollback compatibility.
 - **RAG output is untrusted data.** Every retrieved chunk is wrapped as
   `{"untrusted_data": true, "source": "rag", "content": ...}`; the system
   prompt forbids treating it as instructions.
+- **Low-latency delivery:** Responses API text deltas are forwarded as they
+  arrive; tool phases emit `tool.status`; Products, Orders, and RAG calls share
+  one keep-alive HTTP connection pool.
 
 ## Endpoints
 
 - `GET /`: basic service status.
 - `GET /health`: liveness check.
 - `POST /chat`: the agent endpoint.
+- `POST /chat/turns`: v2 SSE endpoint with typed UI actions, renderables, and
+  confirmation events.
+- `POST /chat/confirmations`: approve or reject a signed pending command.
+- `POST /chat/actions/receipt`: receive the browser's action result.
 - `POST /upload`: ingest a plain-text document into the RAG index.
 
 `POST /chat` request:
@@ -76,9 +84,12 @@ actual token usage across four billing classes (see the root README's
 
 ## Tools
 
-`rag_search_tool` · `search_products_tool` · `get_cart_tool` ·
-`add_to_cart_tool` · `remove_from_cart_tool` · `clear_cart_tool` ·
-`create_order_tool` · `navigate_tool`
+`rag_search_tool` · `search_products_tool` · `get_products_tool` ·
+`compare_products_tool` · `get_cart_tool` · `list_my_orders_tool` ·
+`add_to_cart_tool` · `set_cart_quantity_tool` · `remove_from_cart_tool` ·
+`clear_cart_tool` · `create_order_tool` · `navigate_tool` ·
+`catalog_control_tool` · `select_product_quantity_tool` ·
+`highlight_products_tool`
 
 Authenticated tools detect the session cookie named by `SESSION_COOKIE_NAME`
 and return `"AUTH_REQUIRED"` when it's missing, which the loop turns into a
@@ -86,13 +97,16 @@ login navigation command rather than a raw error.
 
 ## Configuration
 
-Required: `OPENAI_API_KEY` and `INTERNAL_API_TOKEN`.
+Required: `OPENAI_API_KEY`, `INTERNAL_API_TOKEN`, and in production a distinct
+`CHAT_ACTION_SIGNING_SECRET`.
 
 Optional (defaults shown): `OPENAI_CHAT_MODEL` (`gpt-5.6-terra`),
-`OPENAI_REASONING_EFFORT` (`low`), `OPENAI_MAX_OUTPUT_TOKENS` (`1500`),
+`OPENAI_REASONING_EFFORT` (`low`), `OPENAI_MAX_OUTPUT_TOKENS` (`900`),
+`OPENAI_RESPONSE_VERBOSITY` (`low`),
 `OPENAI_INPUT_PRICE_PER_M`, `OPENAI_CACHED_INPUT_PRICE_PER_M`,
 `OPENAI_OUTPUT_PRICE_PER_M`, `PRODUCTS_API_URL`, `ORDERS_API_URL`,
-`SESSION_COOKIE_NAME`, `ALLOWED_ORIGINS`, `CORS_ALLOW_CREDENTIALS`.
+`SESSION_COOKIE_NAME`, `CHAT_SESSION_COOKIE_NAME`, `ALLOWED_ORIGINS`,
+`CORS_ALLOW_CREDENTIALS`.
 
 Price env vars exist so the reported `cost` field tracks whatever the OpenAI
 account is actually billed on a given deployment date. If `ALLOWED_ORIGINS`
@@ -106,7 +120,7 @@ uvicorn app.main:app --reload --port 8004
 pytest
 ```
 
-47 tests, fully offline — OpenAI, RAG, Products, and Orders are all
+55 tests, fully offline — OpenAI, RAG, Products, and Orders are all
 mocked. Representative cases: `test_only_one_mutating_tool_executes_per_model_step`,
 `test_bound_confirmation_is_consumed_after_one_mutation`,
 `test_rag_results_are_marked_as_untrusted_data`,

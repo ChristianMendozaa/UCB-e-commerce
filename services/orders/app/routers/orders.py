@@ -1,5 +1,6 @@
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from typing import List, Optional, Dict, Any, Set
 from datetime import datetime, timezone
 
@@ -12,33 +13,9 @@ from app.deps.permissions import visible_careers_for  # can_manage_career_or_403
 from app.schemas.orders import (
     CreateOrderIn, OrderOut, OrderItemOut, UpdateStatusIn
 )
+from app.services.idempotency import idempotent_order_id
 
 router = APIRouter(prefix="/orders", tags=["orders"])
-
-# ---------- Helpers ----------
-
-def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-def _doc_to_order_out(doc) -> OrderOut:
-    d = doc.to_dict() or {}
-    return OrderOut(
-        id=doc.id,
-        userId=d["userId"],
-        items=[OrderItemOut(**it) for it in d.get("items", [])],
-        total=float(d.get("total", 0)),
-        status=d.get("status", "pending"),
-        createdAt=d.get("createdAt").replace(tzinfo=timezone.utc) if d.get("createdAt") else _now_utc(),
-        updatedAt=d.get("updatedAt").replace(tzinfo=timezone.utc) if d.get("updatedAt") else _now_utc(),
-    )
-
-def _load_product(pid: str) -> Optional[Dict[str, Any]]:
-    doc = firestore_db.collection("products").document(pid).get()
-    if not doc.exists:
-        return None
-    d = doc.to_dict() or {}
-    # campos esperados: name, price (float), stock (int), career (str)
-    return {"id": doc.id, **d}
 
 # ---------- Endpoints cliente ----------
 
@@ -96,7 +73,28 @@ def _load_product(pid: str) -> Optional[Dict[str, Any]]:
     return {"id": doc.id, **d}
 
 @router.post("", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
-def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
+def create_order(
+    payload: CreateOrderIn,
+    user=Depends(get_current_user),
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=200,
+    ),
+):
+    order_ref = (
+        firestore_db.collection("orders").document(
+            idempotent_order_id(user["uid"], idempotency_key)
+        )
+        if idempotency_key
+        else firestore_db.collection("orders").document()
+    )
+    if idempotency_key:
+        existing = order_ref.get()
+        if existing.exists:
+            return _doc_to_order_out(existing)
+
     # 1) Fetch cart from Firestore
     cart_ref = firestore_db.collection("carts").document(user["uid"])
     cart_doc = cart_ref.get()
@@ -136,6 +134,11 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
 
     @gcf.transactional
     def _tx_create(tx: gcf.Transaction):
+        if idempotency_key:
+            existing_order = order_ref.get(transaction=tx)
+            if existing_order.exists:
+                return order_ref
+
         # 3) Operaciones atómicas dentro de la TX
         snapshots = []
         for it in cart_items:
@@ -153,7 +156,6 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
             tx.update(p_ref, {"stock": current - it.quantity})
 
         # 4) Crear el pedido
-        order_ref = firestore_db.collection("orders").document()
         order_payload = {
             "userId": user["uid"],
             "items": [
@@ -181,8 +183,6 @@ def create_order(payload: CreateOrderIn, user=Depends(get_current_user)):
     tx = firestore_db.transaction()
     order_ref = _tx_create(tx)
 
-    created = order_ref.get()
-    return _doc_to_order_out(created)
     created = order_ref.get()
     return _doc_to_order_out(created)
 

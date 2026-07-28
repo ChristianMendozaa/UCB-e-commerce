@@ -90,7 +90,11 @@ def list_products(
             pass
 
     # Nota: filtro de texto simple en cliente; en Firestore puro usarías búsquedas compuestas o un índice externo
-    docs = qry.limit(limit).stream()
+    # Firestore cannot apply this simple substring predicate. Fetch a bounded
+    # candidate window so a search does not incorrectly return only the first
+    # ``limit`` documents before applying the text filter.
+    candidate_limit = min(max(limit * 20, 200), 1000) if q else limit
+    docs = qry.limit(candidate_limit).stream()
     results = []
     for d in docs:
         item = _doc_to_out(d)
@@ -99,6 +103,8 @@ def list_products(
             if q.lower() not in text:
                 continue
         results.append(item)
+        if len(results) >= limit:
+            break
 
     next_cursor = results[-1]["createdAt"].isoformat() if results else None
     return results, next_cursor

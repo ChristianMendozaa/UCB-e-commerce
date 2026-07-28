@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
@@ -16,6 +16,8 @@ import { productsApi } from "@/lib/products"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { useCart } from "@/contexts/cart-context"
+import { useAssistantPage } from "@/contexts/assistant-context"
+import type { AssistantAction } from "@/lib/assistant-protocol"
 
 
 
@@ -84,6 +86,35 @@ export default function ProductDetailPage() {
       setIsAddingToCart(false)
     }
   }
+
+  const handleAssistantAction = useCallback((action: AssistantAction) => {
+    if (action.type !== "product.set_quantity" || !product) return
+    if (action.payload.product_id !== product.id) {
+      throw new Error("La cantidad corresponde a otro producto.")
+    }
+    const requested = Number(action.payload.quantity)
+    if (!Number.isInteger(requested) || requested < 1 || requested > product.stock) {
+      throw new Error("La cantidad solicitada no está disponible.")
+    }
+    setQuantity(requested)
+  }, [product])
+
+  useAssistantPage({
+    surface: "product",
+    capabilities: ["product.set_quantity"],
+    state: product
+      ? {
+          product_id: product.id,
+          name: product.name,
+          price: product.price,
+          stock: product.stock,
+          selected_quantity: quantity,
+          career: product.career,
+          category: product.category,
+        }
+      : { loading: isLoading },
+    handleAction: handleAssistantAction,
+  })
 
   if (isLoading) {
     return (

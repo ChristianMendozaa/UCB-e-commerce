@@ -1,8 +1,15 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
+from google.cloud import firestore as gcf
 from app.core.firebase import firestore_db
+from app.services.idempotency import command_receipt_id
 
 _COLLECTION = "carts"
+_RECEIPT_COLLECTION = "cart_command_receipts"
+
+
+class CartValidationError(ValueError):
+    pass
 
 def _now() -> datetime:
     return datetime.utcnow()
@@ -92,85 +99,141 @@ def get_cart_frontend(uid: str) -> Dict[str, Any]:
         "updatedAt": data.get("updatedAt")
     }
 
-def add_item(uid: str, product_id: str, quantity: int) -> Dict[str, Any]:
-    """Adds quantity to existing item or creates new one."""
-    ref = firestore_db.collection(_COLLECTION).document(uid)
-    doc = ref.get()
-    
-    if not doc.exists:
-        current_items = {}
-    else:
-        current_items = doc.to_dict().get("items", {})
-    
-    current_qty = current_items.get(product_id, 0)
-    new_qty = current_qty + quantity
-    
-    if new_qty <= 0:
-        if product_id in current_items:
-            del current_items[product_id]
-    else:
-        current_items[product_id] = new_qty
-    
-    payload = {
-        "userId": uid,
-        "items": current_items,
-        "updatedAt": _now()
-    }
-    
-    if not doc.exists:
-        ref.set(payload)
-    else:
-        ref.update(payload)
-        
+def _mutate_cart(
+    uid: str,
+    *,
+    operation: str,
+    product_id: Optional[str] = None,
+    quantity: Optional[int] = None,
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    cart_ref = firestore_db.collection(_COLLECTION).document(uid)
+    receipt_ref = (
+        firestore_db.collection(_RECEIPT_COLLECTION).document(
+            command_receipt_id(uid, idempotency_key)
+        )
+        if idempotency_key
+        else None
+    )
+    product_ref = (
+        firestore_db.collection("products").document(product_id)
+        if product_id and operation in {"add", "set"}
+        else None
+    )
+
+    @gcf.transactional
+    def apply(transaction: gcf.Transaction):
+        receipt = receipt_ref.get(transaction=transaction) if receipt_ref else None
+        if receipt is not None and receipt.exists:
+            return
+
+        cart_snapshot = cart_ref.get(transaction=transaction)
+        product_snapshot = (
+            product_ref.get(transaction=transaction) if product_ref else None
+        )
+        items = dict(
+            ((cart_snapshot.to_dict() or {}).get("items", {}))
+            if cart_snapshot.exists
+            else {}
+        )
+
+        if operation in {"add", "set"}:
+            if product_snapshot is None or not product_snapshot.exists:
+                raise CartValidationError("Producto no encontrado.")
+            if not isinstance(quantity, int) or isinstance(quantity, bool):
+                raise CartValidationError("Cantidad inválida.")
+            product = product_snapshot.to_dict() or {}
+            next_quantity = (
+                int(items.get(product_id, 0)) + quantity
+                if operation == "add"
+                else quantity
+            )
+            if next_quantity < 1 or next_quantity > 20:
+                raise CartValidationError("La cantidad debe estar entre 1 y 20.")
+            if next_quantity > int(product.get("stock", 0)):
+                raise CartValidationError("Stock insuficiente.")
+            items[product_id] = next_quantity
+        elif operation == "remove":
+            items.pop(product_id, None)
+        elif operation == "clear":
+            items.clear()
+        else:
+            raise CartValidationError("Operación de carrito desconocida.")
+
+        if items:
+            transaction.set(
+                cart_ref,
+                {
+                    "userId": uid,
+                    "items": items,
+                    "updatedAt": _now(),
+                },
+            )
+        else:
+            transaction.delete(cart_ref)
+        if receipt_ref:
+            transaction.set(
+                receipt_ref,
+                {
+                    "userId": uid,
+                    "operation": operation,
+                    "createdAt": _now(),
+                },
+            )
+
+    apply(firestore_db.transaction())
     return get_cart(uid)
 
-def update_item_quantity(uid: str, product_id: str, quantity: int) -> Dict[str, Any]:
-    """Sets the exact quantity of an item."""
-    ref = firestore_db.collection(_COLLECTION).document(uid)
-    doc = ref.get()
-    
-    if not doc.exists:
-        current_items = {}
-    else:
-        current_items = doc.to_dict().get("items", {})
-        
-    if quantity <= 0:
-        if product_id in current_items:
-            del current_items[product_id]
-    else:
-        current_items[product_id] = quantity
-        
-    payload = {
-        "userId": uid,
-        "items": current_items,
-        "updatedAt": _now()
-    }
-    
-    if not doc.exists:
-        ref.set(payload)
-    else:
-        ref.update(payload)
-        
-    return get_cart(uid)
 
-def remove_item(uid: str, product_id: str) -> Dict[str, Any]:
-    ref = firestore_db.collection(_COLLECTION).document(uid)
-    doc = ref.get()
-    
-    if not doc.exists:
-        return get_cart(uid)
-    
-    current_items = doc.to_dict().get("items", {})
-    if product_id in current_items:
-        del current_items[product_id]
-        payload = {
-            "items": current_items,
-            "updatedAt": _now()
-        }
-        ref.update(payload)
-        
-    return get_cart(uid)
+def add_item(
+    uid: str,
+    product_id: str,
+    quantity: int,
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    return _mutate_cart(
+        uid,
+        operation="add",
+        product_id=product_id,
+        quantity=quantity,
+        idempotency_key=idempotency_key,
+    )
 
-def clear_cart(uid: str) -> Dict[str, Any]:
-    firestore_db.collection(_COLLECTION).document(uid).delete()
-    return {"userId": uid, "items": []}
+
+def update_item_quantity(
+    uid: str,
+    product_id: str,
+    quantity: int,
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    return _mutate_cart(
+        uid,
+        operation="set",
+        product_id=product_id,
+        quantity=quantity,
+        idempotency_key=idempotency_key,
+    )
+
+
+def remove_item(
+    uid: str,
+    product_id: str,
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    return _mutate_cart(
+        uid,
+        operation="remove",
+        product_id=product_id,
+        idempotency_key=idempotency_key,
+    )
+
+
+def clear_cart(
+    uid: str,
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    return _mutate_cart(
+        uid,
+        operation="clear",
+        idempotency_key=idempotency_key,
+    )

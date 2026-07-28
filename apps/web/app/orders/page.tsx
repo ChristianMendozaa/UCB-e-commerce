@@ -1,7 +1,7 @@
 // app/orders/page.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Header } from "@/components/header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,6 +15,8 @@ import type { Product } from "@/lib/products"
 import { productsApi } from "@/lib/products"
 import { authService } from "@/lib/auth"
 import { imageUrl } from "@/lib/image-url"
+import { useAssistantPage } from "@/contexts/assistant-context"
+import type { AssistantAction } from "@/lib/assistant-protocol"
 
 interface OrderWithProducts extends Order {
   products: Array<{
@@ -143,6 +145,25 @@ export default function OrdersPage() {
         return "Desconocido"
     }
   }
+
+  const handleAssistantAction = useCallback(async (action: AssistantAction) => {
+    if (action.type === "orders.refresh") await loadOrders()
+  }, [])
+
+  useAssistantPage({
+    surface: "orders",
+    capabilities: ["orders.refresh"],
+    state: {
+      orders: orders.slice(0, 20).map((order) => ({
+        id: order.id,
+        status: order.status,
+        total: order.total,
+        created_at: order.createdAt,
+      })),
+      count: orders.length,
+    },
+    handleAction: handleAssistantAction,
+  })
 
   if (isLoading) {
     return (

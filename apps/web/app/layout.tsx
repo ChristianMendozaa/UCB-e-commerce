@@ -5,7 +5,9 @@ import { Analytics } from "@vercel/analytics/next"
 import { Suspense } from "react"
 import { CartProvider } from "@/contexts/cart-context"
 import { Toaster } from "@/components/ui/toaster"
+import { AssistantPanel } from "@/components/assistant-panel"
 import { ChatWidget } from "@/components/chat-widget"
+import { AssistantProvider } from "@/contexts/assistant-context"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthWatcher } from "@/components/auth-watcher"
 import "./globals.css"
@@ -59,16 +61,18 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const assistantV2Enabled = process.env.NEXT_PUBLIC_ASSISTANT_V2_ENABLED !== "false"
   return (
     <html lang="es" suppressHydrationWarning>
       <body className={`font-sans ${inter.variable} ${jetbrainsMono.variable} antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <CartProvider>
-            <Suspense fallback={null}>{children}</Suspense>
-            <AuthWatcher />
-            <Toaster />
-            {/* 💬 Chat flotante */}
-            <ChatWidget />
+            <AssistantProvider>
+              <Suspense fallback={null}>{children}</Suspense>
+              <AuthWatcher />
+              <Toaster />
+              {assistantV2Enabled ? <AssistantPanel /> : <ChatWidget />}
+            </AssistantProvider>
           </CartProvider>
         </ThemeProvider>
         <Analytics />

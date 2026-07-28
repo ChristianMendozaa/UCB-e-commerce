@@ -1,6 +1,6 @@
 # app/schemas/products.py
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Dict, Optional, List
 from datetime import datetime
 
 class ProductBase(BaseModel):
@@ -11,6 +11,10 @@ class ProductBase(BaseModel):
     career: str = Field(..., min_length=1, max_length=50)  # clave de carrera (p.ej. "SIS")
     stock: int = Field(0, ge=0)
     image: Optional[str] = ""
+    tags: List[str] = Field(default_factory=list, max_length=30)
+    use_cases: List[str] = Field(default_factory=list, max_length=30)
+    attributes: Dict[str, str] = Field(default_factory=dict)
+    complementary_product_ids: List[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("name", "category", "career", mode="before")
     @classmethod
@@ -28,6 +32,10 @@ class ProductUpdate(BaseModel):
     career: Optional[str] = Field(None, min_length=1, max_length=50)
     stock: Optional[int] = Field(None, ge=0)
     image: Optional[str] = None
+    tags: Optional[List[str]] = Field(None, max_length=30)
+    use_cases: Optional[List[str]] = Field(None, max_length=30)
+    attributes: Optional[Dict[str, str]] = None
+    complementary_product_ids: Optional[List[str]] = Field(None, max_length=20)
 
     @field_validator("name", "category", "career", mode="before")
     @classmethod

@@ -32,6 +32,24 @@ class FakeFunctionCall:
 
 
 @dataclass
+class FakeParsedFunctionCall(FakeFunctionCall):
+    parsed_arguments: dict[str, Any] = field(default_factory=dict)
+    id: str = "fc-test"
+    status: str = "completed"
+
+    def model_dump(self, **kwargs):
+        return {
+            "type": self.type,
+            "id": self.id,
+            "call_id": self.call_id,
+            "name": self.name,
+            "arguments": self.arguments,
+            "status": self.status,
+            "parsed_arguments": self.parsed_arguments,
+        }
+
+
+@dataclass
 class FakeReasoning:
     marker: str = "preserve-me"
     type: str = "reasoning"
@@ -48,6 +66,12 @@ class FakeResponse:
     output: List[Any]
     output_text: str = ""
     usage: FakeUsage = field(default_factory=FakeUsage)
+
+
+@dataclass
+class FakeStreamEvent:
+    type: str
+    delta: str = ""
 
 
 class ScriptedResponses:
@@ -103,10 +127,88 @@ async def test_direct_response_contract_configuration_and_usage_cost(monkeypatch
     request = scripted.calls[0]
     assert request["model"] == "gpt-5.6-terra"
     assert request["reasoning"] == {"effort": "low"}
+    assert request["text"] == {"verbosity": "low"}
     assert request["store"] is False
     assert request["max_output_tokens"] == 1500
     assert request["parallel_tool_calls"] is True
     assert request["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_streaming_turn_forwards_real_deltas_and_uses_session_cache_key(
+    monkeypatch,
+):
+    final_response = FakeResponse(
+        output=[FakeMessage()],
+        output_text="Respuesta rápida",
+    )
+
+    class FakeStream:
+        def __init__(self):
+            self.events = iter(
+                [
+                    FakeStreamEvent("response.created"),
+                    FakeStreamEvent(
+                        "response.output_text.delta",
+                        "Respuesta ",
+                    ),
+                    FakeStreamEvent(
+                        "response.output_text.delta",
+                        "rápida",
+                    ),
+                ]
+            )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.events)
+            except StopIteration as exc:
+                raise StopAsyncIteration from exc
+
+        async def get_final_response(self):
+            return final_response
+
+    class StreamingResponses:
+        def __init__(self):
+            self.calls = []
+
+        def stream(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeStream()
+
+    responses = StreamingResponses()
+    monkeypatch.setattr(
+        agent_service,
+        "openai_async_client",
+        FakeOpenAIClient(responses),
+    )
+    emitted = []
+
+    async def sink(event, data):
+        emitted.append((event, data))
+
+    result = await agent_service.run_agent(
+        "Hola",
+        structured=True,
+        session_id="session-" + "x" * 32,
+        event_sink=sink,
+    )
+
+    assert result["answer"] == "Respuesta rápida"
+    assert emitted == [
+        ("assistant.delta", {"delta": "Respuesta "}),
+        ("assistant.delta", {"delta": "rápida"}),
+    ]
+    assert responses.calls[0]["prompt_cache_key"].startswith("ucb-chat-")
 
 
 def test_usage_cost_accounts_for_cache_writes_and_long_context():
@@ -172,6 +274,39 @@ async def test_tool_loop_preserves_response_output_and_call_id(monkeypatch):
             "output": '[{"id":"product-1"}]',
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_removes_sdk_only_parsed_arguments(monkeypatch):
+    function_call = FakeParsedFunctionCall(
+        call_id="call-search",
+        name="search_products_tool",
+        arguments='{"query":"mochila"}',
+        parsed_arguments={"query": "mochila"},
+    )
+    scripted = install_script(
+        monkeypatch,
+        FakeResponse(output=[function_call]),
+        FakeResponse(output=[FakeMessage()], output_text="Encontré una mochila."),
+    )
+
+    async def fake_execute(name, args, cookies):
+        return '[{"id":"product-1"}]'
+
+    monkeypatch.setattr(agent_service, "execute_tool", fake_execute)
+
+    result = await agent_service.run_agent("Busca una mochila")
+
+    assert result["answer"] == "Encontré una mochila."
+    continued_input = scripted.calls[1]["input"]
+    continued_call = next(
+        item
+        for item in continued_input
+        if isinstance(item, dict) and item.get("type") == "function_call"
+    )
+    assert continued_call["call_id"] == "call-search"
+    assert continued_call["arguments"] == '{"query":"mochila"}'
+    assert "parsed_arguments" not in continued_call
 
 
 @pytest.mark.asyncio
@@ -301,6 +436,56 @@ async def test_unrequested_mutation_is_blocked_outside_the_model(monkeypatch):
         if isinstance(item, dict) and item.get("type") == "function_call_output"
     ]
     assert json.loads(outputs[0]["output"])["error"] == "confirmation_required"
+
+
+@pytest.mark.asyncio
+async def test_structured_turn_requires_signed_confirmation_even_for_legacy_phrase(
+    monkeypatch,
+):
+    scripted = install_script(
+        monkeypatch,
+        FakeResponse(
+            output=[
+                FakeFunctionCall(
+                    "add",
+                    "add_to_cart_tool",
+                    '{"product_id":"p1","quantity":2}',
+                ),
+            ]
+        ),
+        FakeResponse(
+            output=[FakeMessage()],
+            output_text="Confirma la acción en la tarjeta.",
+        ),
+    )
+    executed = []
+
+    async def fake_execute(name, args, cookies):
+        executed.append(name)
+        return "unexpected"
+
+    monkeypatch.setattr(agent_service, "execute_tool", fake_execute)
+
+    result = await agent_service.run_agent(
+        "Confirmo agregar p1 cantidad 2",
+        structured=True,
+        session_id="s" * 40,
+    )
+
+    assert result["answer"] == "Confirma la acción en la tarjeta."
+    assert result["pending_confirmation"]["tool"] == "add_to_cart_tool"
+    assert result["pending_confirmation"]["arguments"] == {
+        "product_id": "p1",
+        "quantity": 2,
+    }
+    assert result["pending_confirmation"]["token"]
+    assert executed == []
+    output = [
+        item
+        for item in scripted.calls[1]["input"]
+        if isinstance(item, dict) and item.get("type") == "function_call_output"
+    ][0]
+    assert json.loads(output["output"])["error"] == "confirmation_required"
 
 
 def test_mutations_require_bound_standalone_confirmation_phrases():
@@ -435,7 +620,7 @@ async def test_openai_request_does_not_retry_permanent_errors(monkeypatch):
 
     result = await agent_service.run_agent("No reintentes")
 
-    assert "temporalmente saturado" in result["answer"]
+    assert "error técnico" in result["answer"]
     assert len(scripted.calls) == 1
     assert waits == []
 

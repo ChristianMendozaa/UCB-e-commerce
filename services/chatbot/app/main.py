@@ -1,14 +1,24 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import ALLOWED_ORIGINS, CORS_ALLOW_CREDENTIALS
 from app.routers import chat
+from app.services.http_client import close_http_client
 
 # ========= APP FASTAPI =============
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    await close_http_client()
+
 
 app = FastAPI(
     title="RAG UCB Commerce",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

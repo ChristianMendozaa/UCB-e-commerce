@@ -9,6 +9,7 @@ sys.path.insert(0, str(SERVICE_ROOT))
 # Valores exclusivamente de prueba. Evitan leer o usar credenciales locales.
 os.environ["OPENAI_API_KEY"] = "test-openai-key"
 os.environ["INTERNAL_API_TOKEN"] = "test-internal-token"
+os.environ["CHAT_ACTION_SIGNING_SECRET"] = "test-chat-signing-secret-32-bytes!"
 os.environ["RAG_API_URL"] = "http://rag.test"
 os.environ["OPENAI_CHAT_MODEL"] = "gpt-5.6-terra"
 os.environ["OPENAI_REASONING_EFFORT"] = "low"

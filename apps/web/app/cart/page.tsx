@@ -1,7 +1,7 @@
 // app/(ruta)/cart/page.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
@@ -18,6 +18,8 @@ import { useCart } from "@/contexts/cart-context"
 import { getCart, getCartDetails, updateQuantity as lsUpdate, removeFromCart as lsRemove, clearCart } from "@/lib/cart"
 import { productsApi, type Product } from "@/lib/products"
 import { ordersApi } from "@/lib/orders"
+import { useAssistantPage } from "@/contexts/assistant-context"
+import type { AssistantAction } from "@/lib/assistant-protocol"
 
 type HydratedItem = {
   productId: string
@@ -122,6 +124,29 @@ export default function CartPage() {
 
   const totalItems = items.reduce((s, it) => s + it.quantity, 0)
   const totalPrice = items.reduce((s, it) => s + ((it.product?.price ?? 0) * it.quantity), 0)
+
+  const handleAssistantAction = useCallback(async (action: AssistantAction) => {
+    if (action.type === "cart.refresh") {
+      await load()
+      await updateCartCount()
+    }
+  }, [user, updateCartCount])
+
+  useAssistantPage({
+    surface: "cart",
+    capabilities: ["cart.refresh"],
+    state: {
+      items: items.slice(0, 20).map((item) => ({
+        product_id: item.productId,
+        quantity: item.quantity,
+        name: item.product?.name,
+      })),
+      total_items: totalItems,
+      total: totalPrice,
+      authenticated: Boolean(user),
+    },
+    handleAction: handleAssistantAction,
+  })
 
   if (isLoading) {
     return (

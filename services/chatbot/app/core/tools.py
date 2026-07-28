@@ -1,12 +1,11 @@
 import json
 import re
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from urllib.parse import quote, unquote_to_bytes, urlsplit
-
-import httpx
 
 from app.core.config import ORDERS_API_URL, PRODUCTS_API_URL, SESSION_COOKIE_NAME
 from app.services import rag_client
+from app.services.http_client import get_http_client
 
 
 _STATIC_NAVIGATION_PATHS = frozenset(
@@ -26,6 +25,10 @@ _MAX_CAREER_SEGMENT_BYTES = 200
 
 def _has_session(cookies: Optional[Dict[str, str]]) -> bool:
     return bool(cookies and SESSION_COOKIE_NAME in cookies)
+
+
+def _idempotency_headers(idempotency_key: Optional[str]) -> Dict[str, str]:
+    return {"Idempotency-Key": idempotency_key} if idempotency_key else {}
 
 
 def _has_control_characters(value: str) -> bool:
@@ -142,7 +145,19 @@ async def rag_search_tool(query: str) -> str:
             {
                 "untrusted_data": True,
                 "source": "rag",
-                "content": str(result["answer"]),
+                "content": {
+                    "text": str(result["answer"]),
+                    "chunks": [
+                        {
+                            "source_id": chunk.get("source_id"),
+                            "namespace": chunk.get("namespace"),
+                            "similarity": chunk.get("similarity"),
+                            "text": chunk.get("text", ""),
+                        }
+                        for chunk in result.get("chunks_used", [])
+                        if isinstance(chunk, dict)
+                    ],
+                },
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -156,37 +171,40 @@ async def get_cart_tool(cookies: Dict[str, str] = None) -> str:
     """
     if not _has_session(cookies):
         return "AUTH_REQUIRED"
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(
-                f"{PRODUCTS_API_URL}/api/cart/chatbot",
-                cookies=cookies
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                items = data.get("items", [])
-                if not items:
-                    return "El carrito está vacío."
-                
-                # Devolvemos los datos crudos (pero legibles) para que el LLM decida cómo presentarlos
-                # El usuario pidió explícitamente NO formatear en código.
-                summary_items = []
-                for item in items:
-                    summary_items.append({
-                        "product_id": item.get('productId'),
-                        "name": item.get('name', 'Producto Desconocido'),
-                        "quantity": item.get('quantity', 0),
-                        "price": item.get('price', 0),
-                        "subtotal": item.get('price', 0) * item.get('quantity', 0),
-                        "currency": "Bs."
-                    })
-                
-                return json.dumps(summary_items, ensure_ascii=False)
-            return f"Error obteniendo carrito: {resp.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
+    client = get_http_client()
+    try:
+        resp = await client.get(
+            f"{PRODUCTS_API_URL}/api/cart/chatbot",
+            cookies=cookies
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            items = data.get("items", [])
+            if not items:
+                return "El carrito está vacío."
 
-async def add_to_cart_tool(product_id: str, quantity: int, cookies: Dict[str, str] = None) -> str:
+            summary_items = []
+            for item in items:
+                summary_items.append({
+                    "product_id": item.get('productId'),
+                    "name": item.get('name', 'Producto Desconocido'),
+                    "quantity": item.get('quantity', 0),
+                    "price": item.get('price', 0),
+                    "subtotal": item.get('price', 0) * item.get('quantity', 0),
+                    "currency": "Bs."
+                })
+
+            return json.dumps(summary_items, ensure_ascii=False)
+        return f"Error obteniendo carrito: {resp.text}"
+    except Exception as e:
+        return f"Error de conexión: {str(e)}"
+
+async def add_to_cart_tool(
+    product_id: str,
+    quantity: int,
+    cookies: Dict[str, str] = None,
+    idempotency_key: Optional[str] = None,
+) -> str:
     """
     Agrega un producto al carrito del usuario.
     """
@@ -207,20 +225,59 @@ async def add_to_cart_tool(product_id: str, quantity: int, cookies: Dict[str, st
     ):
         return "Error: cantidad inválida."
 
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.post(
-                f"{PRODUCTS_API_URL}/api/cart/items",
-                json={"productId": normalized_product_id, "quantity": quantity},
-                cookies=cookies
-            )
-            if resp.status_code in [200, 201]:
-                return "Producto agregado al carrito exitosamente."
-            return f"Error agregando al carrito: {resp.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
+    client = get_http_client()
+    try:
+        resp = await client.post(
+            f"{PRODUCTS_API_URL}/api/cart/items",
+            json={"productId": normalized_product_id, "quantity": quantity},
+            cookies=cookies,
+            headers=_idempotency_headers(idempotency_key),
+        )
+        if resp.status_code in [200, 201]:
+            return "Producto agregado al carrito exitosamente."
+        return f"Error agregando al carrito: {resp.text}"
+    except Exception as e:
+        return f"Error de conexión: {str(e)}"
 
-async def remove_from_cart_tool(product_id: str, cookies: Dict[str, str] = None) -> str:
+async def set_cart_quantity_tool(
+    product_id: str,
+    quantity: int,
+    cookies: Dict[str, str] = None,
+    idempotency_key: Optional[str] = None,
+) -> str:
+    """Establece una cantidad exacta en el carrito."""
+    if not _has_session(cookies):
+        return "AUTH_REQUIRED"
+    normalized_product_id = _normalize_product_id(product_id)
+    if normalized_product_id is None:
+        return "Error: ID de producto inválido."
+    if (
+        not isinstance(quantity, int)
+        or isinstance(quantity, bool)
+        or quantity < 1
+        or quantity > 20
+    ):
+        return "Error: cantidad inválida."
+    client = get_http_client()
+    try:
+        resp = await client.put(
+            f"{PRODUCTS_API_URL}/api/cart/items",
+            json={"productId": normalized_product_id, "quantity": quantity},
+            cookies=cookies,
+            headers=_idempotency_headers(idempotency_key),
+        )
+        if resp.status_code == 200:
+            return "Cantidad del carrito actualizada."
+        return f"Error actualizando el carrito: {resp.text}"
+    except Exception as e:
+        return f"Error de conexión: {str(e)}"
+
+
+async def remove_from_cart_tool(
+    product_id: str,
+    cookies: Dict[str, str] = None,
+    idempotency_key: Optional[str] = None,
+) -> str:
     """
     Elimina un producto del carrito.
     """
@@ -231,57 +288,65 @@ async def remove_from_cart_tool(product_id: str, cookies: Dict[str, str] = None)
     if normalized_product_id is None:
         return "Error: ID de producto inválido."
 
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.delete(
-                f"{PRODUCTS_API_URL}/api/cart/items/"
-                f"{quote(normalized_product_id, safe='')}",
-                cookies=cookies
-            )
-            if resp.status_code == 200:
-                return "Producto eliminado del carrito."
-            return f"Error eliminando del carrito: {resp.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
+    client = get_http_client()
+    try:
+        resp = await client.delete(
+            f"{PRODUCTS_API_URL}/api/cart/items/"
+            f"{quote(normalized_product_id, safe='')}",
+            cookies=cookies,
+            headers=_idempotency_headers(idempotency_key),
+        )
+        if resp.status_code == 200:
+            return "Producto eliminado del carrito."
+        return f"Error eliminando del carrito: {resp.text}"
+    except Exception as e:
+        return f"Error de conexión: {str(e)}"
 
-async def clear_cart_tool(cookies: Dict[str, str] = None) -> str:
+async def clear_cart_tool(
+    cookies: Dict[str, str] = None,
+    idempotency_key: Optional[str] = None,
+) -> str:
     """
     Vacía el carrito de compras.
     """
     if not _has_session(cookies):
         return "AUTH_REQUIRED"
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.delete(
-                f"{PRODUCTS_API_URL}/api/cart",
-                cookies=cookies
-            )
-            if resp.status_code == 200:
-                return "Carrito vaciado exitosamente."
-            return f"Error vaciando el carrito: {resp.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
+    client = get_http_client()
+    try:
+        resp = await client.delete(
+            f"{PRODUCTS_API_URL}/api/cart",
+            cookies=cookies,
+            headers=_idempotency_headers(idempotency_key),
+        )
+        if resp.status_code == 200:
+            return "Carrito vaciado exitosamente."
+        return f"Error vaciando el carrito: {resp.text}"
+    except Exception as e:
+        return f"Error de conexión: {str(e)}"
 
-async def create_order_tool(cookies: Dict[str, str] = None) -> str:
+async def create_order_tool(
+    cookies: Dict[str, str] = None,
+    idempotency_key: Optional[str] = None,
+) -> str:
     """
     Crea un pedido con los items actuales del carrito.
     """
     if not _has_session(cookies):
         return "AUTH_REQUIRED"
-    async with httpx.AsyncClient() as client:
-        try:
-            # El endpoint de orders espera un body vacío ahora
-            resp = await client.post(
-                f"{ORDERS_API_URL}/orders",
-                json={},
-                cookies=cookies
-            )
-            if resp.status_code in [200, 201]:
-                order_data = resp.json()
-                return f"Pedido creado exitosamente. ID del pedido: {order_data.get('id')}"
-            return f"Error creando el pedido: {resp.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
+    client = get_http_client()
+    try:
+        resp = await client.post(
+            f"{ORDERS_API_URL}/orders",
+            json={},
+            cookies=cookies,
+            headers=_idempotency_headers(idempotency_key),
+        )
+        if resp.status_code in [200, 201]:
+            order_data = resp.json()
+            return f"Pedido creado exitosamente. ID del pedido: {order_data.get('id')}"
+        return f"Error creando el pedido: {resp.text}"
+    except Exception as e:
+        return f"Error de conexión: {str(e)}"
 
 def navigate_tool(target: str) -> str:
     """
@@ -308,39 +373,238 @@ def navigate_tool(target: str) -> str:
 
     return json.dumps({"action": "navigate", "url": url})
 
-async def search_products_tool(query: str) -> str:
+async def search_products_tool(
+    query: str,
+    *,
+    career: Optional[str] = None,
+    category: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    in_stock: Optional[bool] = None,
+    sort: Optional[str] = None,
+) -> str:
     """
     Busca productos por nombre o descripción usando la API de productos (búsqueda simple).
     Útil cuando el RAG no encuentra exactitudes o para búsquedas cortas.
     """
-    if not query or not query.strip():
+    if not isinstance(query, str):
         return "Error: término de búsqueda inválido."
+    if min_price is not None and min_price < 0:
+        return "Error: precio mínimo inválido."
+    if max_price is not None and max_price < 0:
+        return "Error: precio máximo inválido."
+    if min_price is not None and max_price is not None and max_price < min_price:
+        return "Error: rango de precio inválido."
+    if sort not in {None, "name", "price-low", "price-high", "stock"}:
+        return "Error: orden inválido."
 
-    async with httpx.AsyncClient() as client:
-        try:
-            # Usamos la ruta pública que ya soporta búsqueda "q"
-            resp = await client.get(
-                f"{PRODUCTS_API_URL}/api/products/public",
-                params={"q": query.strip(), "limit": 5}
+    client = get_http_client()
+    try:
+        resp = await client.get(
+            f"{PRODUCTS_API_URL}/api/products/public",
+            params={
+                "q": query.strip() or None,
+                "career": career.strip() if isinstance(career, str) and career.strip() else None,
+                "category": category.strip() if isinstance(category, str) and category.strip() else None,
+                "limit": 100,
+            }
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            items = data.get("items", [])
+            filtered = []
+            for item in items:
+                price = float(item.get("price", 0))
+                stock = int(item.get("stock", 0))
+                if min_price is not None and price < min_price:
+                    continue
+                if max_price is not None and price > max_price:
+                    continue
+                if in_stock is True and stock <= 0:
+                    continue
+                filtered.append(item)
+            if sort == "name":
+                filtered.sort(key=lambda value: str(value.get("name", "")).casefold())
+            elif sort == "price-low":
+                filtered.sort(key=lambda value: float(value.get("price", 0)))
+            elif sort == "price-high":
+                filtered.sort(key=lambda value: float(value.get("price", 0)), reverse=True)
+            elif sort == "stock":
+                filtered.sort(key=lambda value: int(value.get("stock", 0)), reverse=True)
+
+            if not filtered:
+                return "No encontré productos con ese término en la base de datos."
+
+            results = []
+            for item in filtered[:8]:
+                results.append({
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "price": item.get("price"),
+                    "stock": item.get("stock"),
+                    "career": item.get("career"),
+                    "category": item.get("category")
+                })
+            return json.dumps(results, ensure_ascii=False)
+        return f"Error buscando productos: {resp.text}"
+    except Exception as e:
+        return f"Error de conexión: {str(e)}"
+
+
+async def get_products_tool(product_ids: List[str]) -> str:
+    """Obtiene datos canónicos y actuales para hasta cuatro productos."""
+    if not isinstance(product_ids, list) or not 1 <= len(product_ids) <= 4:
+        return "Error: debes indicar entre uno y cuatro productos."
+    normalized_ids: list[str] = []
+    for product_id in product_ids:
+        normalized = _normalize_product_id(product_id)
+        if normalized is None:
+            return "Error: ID de producto inválido."
+        if normalized not in normalized_ids:
+            normalized_ids.append(normalized)
+
+    client = get_http_client()
+
+    async def load(product_id: str):
+        response = await client.get(
+            f"{PRODUCTS_API_URL}/api/products/{quote(product_id, safe='')}",
+        )
+        if response.status_code != 200:
+            return {"id": product_id, "error": "Producto no encontrado."}
+        product = response.json()
+        return {
+            key: product.get(key)
+            for key in (
+                "id",
+                "name",
+                "description",
+                "price",
+                "stock",
+                "career",
+                "category",
+                "image",
+                "tags",
+                "use_cases",
+                "attributes",
+                "complementary_product_ids",
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                items = data.get("items", [])
-                if not items:
-                    return "No encontré productos con ese término en la base de datos."
-                
-                # Formatear respuesta para el LLM
-                results = []
-                for item in items:
-                    results.append({
-                        "id": item.get("id"),
-                        "name": item.get("name"),
-                        "price": item.get("price"),
-                        "stock": item.get("stock"),
-                        "career": item.get("career"),
-                        "category": item.get("category")
-                    })
-                return json.dumps(results, ensure_ascii=False)
-            return f"Error buscando productos: {resp.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
+            if product.get(key) is not None
+        }
+
+    try:
+        import asyncio
+
+        products = await asyncio.gather(*(load(item) for item in normalized_ids))
+        return json.dumps(products, ensure_ascii=False)
+    except Exception as exc:
+        return f"Error de conexión: {str(exc)}"
+
+
+async def compare_products_tool(product_ids: List[str]) -> str:
+    """Compara de dos a cuatro productos usando datos actuales del catálogo."""
+    if not isinstance(product_ids, list) or not 2 <= len(product_ids) <= 4:
+        return "Error: selecciona entre dos y cuatro productos para comparar."
+    return await get_products_tool(product_ids)
+
+
+async def list_my_orders_tool(
+    cookies: Dict[str, str] = None,
+    status: Optional[str] = None,
+) -> str:
+    """Lista los pedidos recientes del usuario autenticado."""
+    if not _has_session(cookies):
+        return "AUTH_REQUIRED"
+    if status not in {None, "pending", "confirmed", "shipped", "delivered"}:
+        return "Error: estado de pedido inválido."
+    params = {"limit": 20}
+    if status:
+        params["status_filter"] = status
+    client = get_http_client()
+    try:
+        response = await client.get(
+            f"{ORDERS_API_URL}/orders/me",
+            params=params,
+            cookies=cookies,
+        )
+        if response.status_code == 200:
+            return json.dumps(response.json(), ensure_ascii=False, default=str)
+        return f"Error consultando pedidos: {response.text}"
+    except Exception as exc:
+        return f"Error de conexión: {str(exc)}"
+
+
+def catalog_control_tool(
+    *,
+    query: Optional[str] = None,
+    career: Optional[str] = None,
+    category: Optional[str] = None,
+    sort: Optional[str] = None,
+    view: Optional[str] = None,
+) -> str:
+    """Emite un efecto tipado para controlar filtros visibles del catálogo."""
+    if sort not in {None, "name", "price-low", "price-high", "stock"}:
+        return "Error: orden de catálogo inválido."
+    if view not in {None, "grid", "list"}:
+        return "Error: modo de catálogo inválido."
+    filters = {
+        key: value.strip()
+        for key, value in {
+            "query": query,
+            "career": career,
+            "category": category,
+        }.items()
+        if isinstance(value, str) and value.strip()
+    }
+    return json.dumps(
+        {
+            "action": "catalog.apply_filters",
+            "payload": {
+                "filters": filters,
+                **({"sort": sort} if sort else {}),
+                **({"view": view} if view else {}),
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def select_product_quantity_tool(product_id: str, quantity: int) -> str:
+    normalized_product_id = _normalize_product_id(product_id)
+    if normalized_product_id is None:
+        return "Error: ID de producto inválido."
+    if (
+        not isinstance(quantity, int)
+        or isinstance(quantity, bool)
+        or quantity < 1
+        or quantity > 20
+    ):
+        return "Error: cantidad inválida."
+    return json.dumps(
+        {
+            "action": "product.set_quantity",
+            "payload": {
+                "product_id": normalized_product_id,
+                "quantity": quantity,
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def highlight_products_tool(product_ids: List[str]) -> str:
+    if not isinstance(product_ids, list) or not 1 <= len(product_ids) <= 8:
+        return "Error: lista de productos inválida."
+    normalized: list[str] = []
+    for product_id in product_ids:
+        value = _normalize_product_id(product_id)
+        if value is None:
+            return "Error: ID de producto inválido."
+        if value not in normalized:
+            normalized.append(value)
+    return json.dumps(
+        {
+            "action": "products.highlight",
+            "payload": {"product_ids": normalized},
+        },
+        ensure_ascii=False,
+    )

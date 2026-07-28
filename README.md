@@ -9,7 +9,7 @@ Search over the catalog.
 
 The interesting engineering problem is not "call an LLM." It's that the agent
 holds real write access to a stranger's cart and order history, consumes
-retrieved text that a user could poison, and runs in a stateless request/reply
+retrieved text that a user could poison, and runs a stateless bounded agent
 loop with no server-side conversation memory. Every mechanism below exists to
 answer one question: **what stops the model from acting on its own?**
 
@@ -24,17 +24,17 @@ Search · OpenAI Responses API · Docker · Vercel Services
   `search_products_tool`, `add_to_cart_tool`, `create_order_tool`,
   `navigate_tool` — against live Firestore-backed services, bounded to 6
   reasoning steps per turn.
-- **No unilateral mutations.** Every cart or order write requires a
-  confirmation phrase parsed *outside* the model, bound to the exact tool
-  arguments it approves, and consumed exactly once — even if the downstream
-  call fails.
+- **No unilateral mutations.** Every cart or order write requires approval
+  outside the model. The current copilot uses a short-lived signed action
+  token bound to session, exact arguments, and an idempotency key; the legacy
+  endpoint retains argument-bound confirmation phrases for rollback.
 - **Retrieved content can't hijack the agent.** RAG results are wrapped as
   `{"untrusted_data": true, ...}` and the system prompt explicitly forbids
   treating retrieved text as instructions.
 - **Cost is measured per turn, not estimated after the fact.** Token usage is
   split into four billing classes (cache read, cache write, long-context
   tiers included) and returned as a `cost` field on every response.
-- **132 tests, no network.** Auth, cart mutation, prompt-injection, and
+- **146 tests, no network.** Auth, cart mutation, prompt-injection, and
   confirmation logic are pinned by adversarial unit tests against mocked
   OpenAI/Firestore — nothing hits a real API in CI.
 - **Stateless, replaceable containers.** All seven services are non-root,
@@ -107,6 +107,28 @@ full binding table.
 
 ## The agent
 
+### Copilot protocol v2
+
+The customer UI uses `POST /api/chat/turns`, an SSE protocol that forwards
+OpenAI `response.output_text.delta` events as they are generated and separates
+assistant text from typed `tool.status`, `ui.action`, `renderable`, and
+`confirmation.required` events. An `AssistantProvider` validates actions with
+Zod and dispatches only capabilities registered by the active page. Catalog
+filters, sorting, product quantities, highlighting, navigation, and refreshes
+are therefore controlled through an allowlist rather than model-authored DOM
+instructions.
+
+Business mutations are proposed during the agent loop but are not executed.
+The server returns an HMAC-signed confirmation token with a five-minute
+expiry. Approval through `POST /api/chat/confirmations` revalidates the
+session and sends the token's idempotency key to Products or Orders. Cart
+transactions store command receipts, while order IDs are deterministic for
+an idempotency key, so retries and token replay return the original outcome
+without repeating stock or cart changes.
+
+The older `/api/chat` response contract remains available behind
+`NEXT_PUBLIC_ASSISTANT_V2_ENABLED=false` during rollout.
+
 Each `/chat` turn runs a bounded loop against the OpenAI Responses API in
 stateless mode (`store=False`): the server holds no conversation state between
 requests, so every turn resends the system prompt, the client-supplied
@@ -121,7 +143,7 @@ sequenceDiagram
     participant O as OpenAI Responses API
     participant P as Products / Orders
 
-    U->>W: POST /api/chat {question, history, current_page}
+    U->>W: POST /api/chat/turns {question, history, page_context}
     W->>C: forward + cookies
     loop up to 6 steps
         C->>O: responses.create(tools, input)
@@ -129,13 +151,17 @@ sequenceDiagram
         alt read-only tools (rag_search, get_cart, search_products)
             C->>P: run concurrently (asyncio.gather)
         else mutating tool (add/remove/clear/create_order)
-            C->>P: run at most one per step, await it
+            C-->>W: signed confirmation.required, nothing mutates
         end
         P-->>C: tool result
         C->>O: function_call_output (all results, in order)
     end
-    C-->>W: {answer, trace, cost}
-    W-->>U: JSON response
+    C-->>W: SSE text, renderables, typed UI actions
+    W-->>U: validate and render/dispatch events
+    U->>W: approve signed command
+    W->>C: POST /chat/confirmations
+    C->>P: execute once with Idempotency-Key
+    P-->>C: mutation result or stored replay result
 ```
 
 Governing constants (`services/chatbot/app/services/agent_service.py`):
@@ -152,11 +178,12 @@ Governing constants (`services/chatbot/app/services/agent_service.py`):
 
 Three independent controls, each enforced in code the model does not control:
 
-**1. Argument-bound confirmation, parsed outside the model.** Before any
+**1. Confirmation enforced outside the model.** Before any
 mutating tool (`add_to_cart_tool`, `remove_from_cart_tool`, `clear_cart_tool`,
-`create_order_tool`) is allowed to run, the user's *current* message — not the
-model's interpretation of it — is matched against an exact phrase pattern
-(NFKC-normalized, Firestore ID case preserved):
+`create_order_tool`) is allowed to run, the v2 UI requires an action token
+signed by the server and bound to the chat session, exact arguments, expiry,
+and idempotency key. The legacy endpoint continues to recognize these exact
+phrases (NFKC-normalized, Firestore ID case preserved):
 
 ```
 "Confirmo agregar PRODUCT_ID cantidad N"   (1 ≤ N ≤ 20)
@@ -165,18 +192,20 @@ model's interpretation of it — is matched against an exact phrase pattern
 "Confirmo crear el pedido"
 ```
 
-The tool call's actual arguments (`product_id`, `quantity`) must match the
-confirmed values exactly, and a confirmation is consumed the moment a matching
-call is attempted — even if the downstream HTTP call to Products/Orders then
-fails — so it can't be replayed across turns.
+For v2, the tool call's exact name and arguments are covered by the token
+signature. The approval endpoint also checks the session and expiry before
+passing the token's idempotency key downstream, so a client retry cannot repeat
+the stock or cart mutation.
 
 ```mermaid
 flowchart LR
-    A[Model requests a mutating tool call] --> B{Does the CURRENT user\nmessage match the confirmation\nphrase for this exact tool?}
-    B -- no --> C[confirmation_required error\nreturned to the model, nothing executes]
-    B -- yes --> D{Do call args match\nthe confirmed args?}
-    D -- no --> C
-    D -- yes --> E[Confirmation consumed\ntool executes exactly once]
+    A[Model proposes a mutating tool call] --> B[Server signs session, tool, args, expiry and idempotency key]
+    B --> C[Browser shows an explicit confirmation card]
+    C -->|reject| D[Command discarded]
+    C -->|approve| E{Signature, session and expiry valid?}
+    E -->|no| D
+    E -->|yes| F[Products or Orders executes with Idempotency-Key]
+    F --> G[Replay returns the prior result without repeating the mutation]
 ```
 
 **2. Retrieved content is data, never instructions.** `rag_search_tool` wraps
@@ -191,7 +220,7 @@ only known static paths or a validated product/career ID — normalizing
 Unicode, rejecting path traversal, control characters, and Firestore's
 reserved `__id__` pattern — and explicitly excludes `/admin`. The browser then
 re-validates the same URL independently before calling `router.push`
-(`apps/web/components/chat-widget.tsx`), so a compromised or buggy backend
+(`apps/web/contexts/assistant-context.tsx`), so a compromised or buggy backend
 still can't redirect a user off-origin.
 
 These properties are pinned by tests, not just described: see
@@ -291,12 +320,12 @@ chat, which matters because containers are stateless-by-design across this
 whole system — a chatbot instance restarting or scaling to zero can't lose or
 mix up a conversation it never held.
 
-**Confirmation parsed outside the model, not left to prompt instructions.**
+**Confirmation is a signed protocol outside the model.**
 An LLM can be argued out of a system-prompt rule by an adversarial user
-message or a poisoned tool result; a regex match against the user's literal
-current message cannot. The cost is UX rigidity — the confirmation phrase
-must be exact — accepted deliberately over the alternative of a model that
-*usually* asks before spending someone's stock.
+message or a poisoned tool result. The v2 flow therefore signs the exact tool,
+arguments, session, expiry, and idempotency key; only the confirmation endpoint
+can execute that command. The legacy endpoint's literal-regex confirmation
+remains isolated as a rollback path.
 
 **One mutation per model step, always awaited before the loop continues.**
 This is what makes "confirmation consumed once" actually true under
@@ -369,32 +398,32 @@ bill.
 
 | Threat | Control | Enforced in |
 |---|---|---|
-| Agent mutates cart/orders without user intent | Argument-bound, single-use confirmation phrase parsed outside the model | `agent_service.py: _confirmed_mutations`, `_mutation_arguments_match` |
+| Agent mutates cart/orders without user intent | Signed, expiring, session-bound confirmation plus downstream idempotency; argument-bound phrases remain for legacy rollback | `confirmation_service.py`, Products cart transaction, Orders idempotent order ID |
 | Indirect prompt injection via product/RAG text | Retrieved content wrapped as `untrusted_data`; system prompt forbids treating it as instructions | `tools.py: rag_search_tool`, `SYSTEM_PROMPT` |
-| Agent-driven open redirect / admin access | `navigate_tool` allowlist excludes `/admin`; browser independently re-validates the URL before navigating | `tools.py: _normalize_application_path`, `chat-widget.tsx: safeNavigationPath` |
+| Agent-driven open redirect / admin access | `navigate_tool` excludes `/admin`; browser re-validates routes and dispatches only page-declared capabilities | `tools.py`, `assistant-navigation.ts`, `assistant-context.tsx` |
 | Forged or replayed session | Firebase session cookies, `httpOnly` + `SameSite=Lax`, `check_revoked=True` on every verification path, with a bounded 15s clock-skew retry that still enforces revocation | `services/*/app/deps/auth.py` |
 | Cross-career privilege escalation | Career-scoped RBAC; moving a product requires authority over **both** the source and destination career | `products/app/deps/permissions.py: can_move_product_or_403` |
 | Malicious image upload (polyglot, decompression bomb, animated payload) | Byte-level format detection via Pillow (upload MIME/extension never trusted); re-encode strips metadata/trailing payloads; dimension and megapixel caps | `services/images/utils/utils.py` |
 | Oversized request exhausting a service | 4 MiB original-image cap enforced at four boundaries (browser, BFF, Products, Images); BFF caps the full multipart body at 4,450,000 bytes; chat payload capped at 96 KiB | `apps/web/lib/upload-limits.ts`, `app/api/chat/route.ts` |
 | Path traversal through proxied route segments | Multi-pass percent-decoding with traversal/control-character rejection before re-encoding | `apps/web/lib/server/proxy-path.ts` |
-| Chat endpoint abuse / cost runaway | Per-IP token-bucket rate limit (12 req/60s), LRU-bounded to 10k tracked clients | `apps/web/app/api/chat/route.ts` |
+| Chat endpoint abuse / cost runaway | Per-instance 12 req/60s backstop keyed by the v2 chat session; the legacy endpoint retains its per-IP limiter | `apps/web/lib/server/chat-rate-limit.ts`, `apps/web/app/api/chat/route.ts` |
 | Stored image XSS/MIME confusion on download | `default-src 'none'; sandbox`, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin` on every image response | `services/images/routers/images.py`, `apps/web/app/api/images/[id]/route.ts` |
 | Unauthenticated cross-service RAG access | Shared-secret `X-Internal-Token`, checked with `compare_digest`, required on every `/internal/rag/*` call from Products or Chatbot | `services/rag/app/deps/internal_auth.py` |
 
 ## Testing
 
-132 tests across five Python services, all offline — OpenAI,
+146 tests across six Python services, all offline — OpenAI,
 Firestore, and downstream HTTP calls are mocked or monkeypatched, so the suite
 never depends on network access or live credentials.
 
 | Service | Tests | Pins |
 |---|---:|---|
-| `chatbot` | 47 | Agent loop step budget, confirmation gating, one-mutation-per-step, untrusted RAG wrapping, navigation allowlist, retry policy, chat request/response contract |
+| `chatbot` | 55 | Real model-delta streaming, pooled service clients, signed confirmation/session binding, structured SSE events, one-mutation-per-step, untrusted RAG wrapping, retry policy |
 | `images` | 41 | Upload size limits, format/dimension/downscale validation, response security headers, read-path ETag/`If-None-Match`/cache-control (`fastapi.testclient`), `?w=` variant rendering and caching |
-| `products` | 18 | Career-scoped permissions, image upload error propagation, upload size limits, best-effort RAG sync HTTP calls |
+| `products` | 21 | Career-scoped permissions, idempotency-key scoping, image upload error propagation, upload size limits, best-effort RAG sync HTTP calls |
 | `auth` | 13 | Session cookie lifecycle, revocation-preserving clock-skew retry, account-deletion cleanup, CORS credential policy |
 | `rag` | 13 | Firestore vector writes/queries, source persistence, atomic replacement, rebuild safety, internal-token auth, chunking and embedding shape |
-| `orders` | — | No automated tests yet (see Known limitations) |
+| `orders` | 3 | Deterministic, user-scoped order command IDs and invalid-key rejection |
 
 Representative adversarial tests — the ones that pin the guarantees above
 rather than just happy paths:
@@ -448,8 +477,10 @@ Stated plainly because a system with none would be suspicious:
   multiple instances and scale to zero; the in-memory 12 req/60s limiter is a
   local backstop, not an account-wide OpenAI spending cap. Production needs a
   distributed limiter (Vercel Firewall or a keyed external store) on top of it.
-- **No response streaming.** The client waits for the full agent turn
-  (up to 6 model round-trips) before seeing any text.
+- **Tool-dependent turns still require sequential model rounds.** Real model
+  deltas and `tool.status` progress stream immediately, but an answer that
+  depends on a catalog/RAG result cannot finish until that tool returns and
+  the next model round consumes its output.
 - **RAG sync runs inline in the product write path.** Creating or updating a
   product makes a synchronous HTTP call to `rag`'s
   `/internal/rag/documents` (which in turn calls OpenAI) as part of that
@@ -468,17 +499,17 @@ Stated plainly because a system with none would be suspicious:
 - **No distributed tracing.** Cost and step counts are logged per request;
   there's no cross-service trace ID connecting a chat turn to the Products/
   Orders calls it triggered.
-- **`orders` has no automated test suite** while every other backend service
-  does.
+- **Orders coverage is still narrow.** Its new idempotency contract has a
+  focused pure test suite, but the Firestore stock/cart transaction still
+  needs emulator-backed concurrency tests.
 
 ## Roadmap
 
 - Distributed/global chat rate limiting keyed by authenticated user.
 - Move RAG sync off the product-write request path onto a queue with retry.
-- Stream agent responses token-by-token instead of returning one final blob.
 - Add a retrieval evaluation set to justify (or retune) the similarity
   threshold with data instead of observation.
-- Bring `orders` up to the same test coverage as the other services.
+- Add Firestore-emulator concurrency tests for order and cart replay.
 - Propagate a trace ID from the BFF through chatbot → products/orders/rag for
   cross-service debugging.
 
@@ -653,7 +684,8 @@ Set these values in the dashboard; do not upload local `.env` files:
 
 - Web build/runtime: `NEXT_PUBLIC_FIREBASE_API_KEY`,
   `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, and
-  `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+  `NEXT_PUBLIC_FIREBASE_PROJECT_ID`; optionally
+  `NEXT_PUBLIC_ASSISTANT_V2_ENABLED=false` for the legacy-widget rollback
 - Auth: the `FIREBASE_*` service-account fields,
   `FIREBASE_WEB_API_KEY`, provisioning flags, and `SESSION_*`
 - Orders: the `FIREBASE_*`, provisioning, and `SESSION_*` values
@@ -661,7 +693,8 @@ Set these values in the dashboard; do not upload local `.env` files:
   `IMAGE_PUBLIC_BASE_PATH=/api/images`, and `INTERNAL_API_TOKEN` values
 - Chatbot: `OPENAI_API_KEY`, model/cost controls documented in its example,
   `INTERNAL_API_TOKEN` (must match Rag's and Products' value exactly), and
-  `SESSION_COOKIE_NAME`
+  `SESSION_COOKIE_NAME`; set a distinct, random
+  `CHAT_ACTION_SIGNING_SECRET` for signed confirmations
 - Images: the exact `FIREBASE_*` names in
   `services/images/.env.example`, plus `FIREBASE_COLLECTION`, the clamped
   `MAX_B64_BYTES`, and the image dimension limits
@@ -691,7 +724,8 @@ map of what each service needs.
 **`apps/web`** — `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`,
 `NEXT_PUBLIC_FIREBASE_PROJECT_ID` (browser bundle); `AUTH_API_URL`,
 `ORDERS_API_URL`, `PRODUCTS_API_URL`, `CHATBOT_API_URL`,
-`IMAGE_SERVICE_BASE_URL` (server-only upstreams).
+`IMAGE_SERVICE_BASE_URL` (server-only upstreams); and optionally
+`NEXT_PUBLIC_ASSISTANT_V2_ENABLED=false` to roll back to the legacy widget.
 
 **`services/auth`** — `ALLOWED_ORIGINS`, the `FIREBASE_*` service-account
 fields, `FIREBASE_WEB_API_KEY`, `ENABLE_FIRESTORE_PROVISIONING`,
@@ -708,11 +742,13 @@ OpenAI or vector-DB credentials of its own).
 
 **`services/chatbot`** — `OPENAI_API_KEY`, `OPENAI_CHAT_MODEL`,
 `OPENAI_REASONING_EFFORT`, `OPENAI_MAX_OUTPUT_TOKENS`,
+`OPENAI_RESPONSE_VERBOSITY`,
 `OPENAI_INPUT_PRICE_PER_M`, `OPENAI_CACHED_INPUT_PRICE_PER_M`,
 `OPENAI_OUTPUT_PRICE_PER_M`, `INTERNAL_API_TOKEN` (sent as `X-Internal-Token`
 on calls to `rag`'s `/internal/rag/*`), `PRODUCTS_API_URL`, `ORDERS_API_URL`,
-`RAG_API_URL`, `SESSION_COOKIE_NAME`, `ALLOWED_ORIGINS`,
-`CORS_ALLOW_CREDENTIALS`. Holds no embedding or vector-store credentials.
+`RAG_API_URL`, `SESSION_COOKIE_NAME`, `CHAT_SESSION_COOKIE_NAME`,
+`CHAT_ACTION_SIGNING_SECRET`, `ALLOWED_ORIGINS`, `CORS_ALLOW_CREDENTIALS`.
+Holds no embedding or vector-store credentials.
 
 **`services/images`** — the `FIREBASE_*` service-account fields,
 `FIREBASE_COLLECTION`, `MAX_B64_BYTES` (clamped to 983,040),
